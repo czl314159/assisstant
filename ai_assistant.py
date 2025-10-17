@@ -24,7 +24,7 @@ API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
 # --- 3. 将AI调用逻辑封装成一个函数 ---
 # 这样做的好处是代码更清晰，可以重复使用
-def get_ai_reply(prompt):
+def get_ai_reply(history):
     """调用阿里通义千问qwen-flash模型，获取AI回复"""
     headers = {
         "Content-Type": "application/json",
@@ -33,12 +33,7 @@ def get_ai_reply(prompt):
 
     data = {
         "model": "qwen-flash",
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt # 这里使用函数传入的问题
-            }
-        ],
+        "messages": history,
         "temperature": 0.5,
     }
 
@@ -65,6 +60,9 @@ def get_ai_reply(prompt):
 print("AI小助手已启动！输入 'quit' 或 'exit' 来结束对话。")
 print("="*30)
 
+# 这是我们的“记忆芯片”！一个存储所有对话的列表
+conversation_history = []
+
 # 使用 while True 创建一个无限循环
 while True:
     # 使用 input() 来获取你在终端输入的问题
@@ -75,7 +73,18 @@ while True:
         print("AI小助手：再见啦！")
         break # 跳出循环
 
-    # 调用函数，获取AI的回答
-    ai_reply = get_ai_reply(user_input) #调用函数，获取AI的回答
-    print(f"AI助手：{ai_reply}") #打印AI的回答
+    # 将用户的输入存入“记忆”
+    conversation_history.append({"role": "user", "content": user_input})
+
+    # 2. 调用函数，把全部“记忆”都发给AI
+    ai_response = get_ai_reply(conversation_history)
+
+    # 3. 将AI的回答也存入“记忆”，形成完整的上下文
+    # (我们加一个判断，确保不会把错误信息也记下来)
+    if "请求失败" not in ai_response and "未知错误" not in ai_response:
+        conversation_history.append({"role": "assistant", "content": ai_response})
+    
+    # 4. 打印AI的回答
+    print(f"AI助手：{ai_response}") #打印AI的回答
     print("-"*30) #打印分隔线
+
