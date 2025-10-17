@@ -1,31 +1,25 @@
 import os
 import requests
 import json
+import sys
 from dotenv import load_dotenv
-
 
 load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.env文件
 
 # --- 1. 配置程序所需的变量 ---
 
-# 提示：为了安全，最好将API密钥存储在环境变量中。
+# 提示：为了安全，最好将API密钥存储在环境变量中.如果环境变量不存在，打印错误信息并退出。
 API_KEY = os.getenv("ALIYUN_API_KEY") 
-if not API_KEY: # 如果环境变量不存在
-    print("错误：未找到ALIYUN_API_KEY环境变量！") # 打印错误信息
-    print("请在.env文件中设置您的API密钥") # 打印提示信息
-    exit(1) # 退出程序
+if not API_KEY: 
+    print("错误：未找到ALIYUN_API_KEY环境变量！") 
+    print("请在.env文件中设置您的API密钥") 
+    exit(1) 
 
 # 如果无法直接访问API，可以在这里设置代理服务器地址
 PROXY_URL = None 
-
 MODEL_NAME = "qwen-flash"
-
-# 阿里云 DeepSeek-V3.1 模型的API地址
 API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" 
-
-
-HISTORY_FILE = "data/chat_log.json" # 历史记录文件
-
+HISTORY_FILE = "data/chat_log.json" # 历史记录文件路径
 TEMPERARURE = 0.5
 
 data_folder = os.path.dirname(HISTORY_FILE) # 如果 data 文件夹不存在，就自动创建它
@@ -68,18 +62,51 @@ def get_ai_reply(history):
         error_details = response.text if 'response' in locals() else "无响应内容"
         return f"发生未知错误：{e}\n服务器响应：{error_details}"
 
-# --- 3. 主程序：实现永久记忆和循环对话 ---
 
 
+# --- 3. 主程序：实现永久记忆、循环对话和文件读取 ---
+#首先尝试从文件加载历史记录
 try:
     with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-        # 【修改】程序启动时，尝试从文件加载历史记录
         conversation_history = json.load(f)
-    print("AI小助手：已成功加载过往记忆，让我们继续上次的话题吧！")
+    print("AI小助手：已成功加载过往记忆。")
 except FileNotFoundError:
     # 如果文件不存在，说明是第一次运行，就创建一个空的列表
     conversation_history = []
     print("AI小助手：你好！一个新的旅程开始了。")
+
+#第二步：检查是否需要“注入”新文件作为上下文
+if len(sys.argv) > 1:
+    try:
+        file_path = sys.argv[1]
+        with open(file_path, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+
+# 【核心】构建注入的提示，并将其追加到现有历史的末尾
+        injection_prompt = f"""
+好的，我现在为你提供一份新的文件内容。请你阅读并理解它，接下来可能会用到它。
+---
+文件路径: {os.path.basename(file_path)}
+文件内容如下：
+{file_content}
+---
+如果你已经阅读并理解了以上内容，请回复：“好的，新文件已阅读完毕，我们可以开始讨论了。”
+"""
+        
+        conversation_history.append({"role": "user", "content": injection_prompt})
+        print(f"AI小助手：正在注入新文件: {os.path.basename(file_path)} ...")
+
+        # 【关键】注入后，立即让AI进行一次“确认性回复”，并将回复也存入历史
+        ai_response = get_ai_reply(conversation_history)
+        conversation_history.append({"role": "assistant", "content": ai_response})
+        print(f"AI助手：{ai_response}")
+
+    except FileNotFoundError:
+        print(f"错误：找不到文件 {sys.argv[1]}。请检查路径是否正确。")
+        exit()
+    except Exception as e:
+        print(f"处理文件时发生错误：{e}")
+        exit()
 
 print("="*30)
 
@@ -110,6 +137,6 @@ while True:
         conversation_history.append({"role": "assistant", "content": ai_response})
     
     # 4. 打印AI的回答
-    print(f"AI助手：{ai_response}") #打印AI的回答
+    print(f"AI助手：{ai_response}") 
     print("-"*30) #打印分隔线
 
