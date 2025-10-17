@@ -13,29 +13,33 @@ API_KEY = os.getenv("ALIYUN_API_KEY")
 # 如果你可以直接访问，请将下面这行保留为None
 PROXY_URL = None 
 
+if not API_KEY:
+    print("错误：未找到ALIYUN_API_KEY环境变量！")
+    print("请在.env文件中设置您的API密钥")
+    exit(1)
+
 # --- 2. 设定我们要联系的“魔法塔”地址 ---
 # 阿里云 DeepSeek-V3.1 模型的API地址
 API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
 # --- 3. 将AI调用逻辑封装成一个函数 ---
 # 这样做的好处是代码更清晰，可以重复使用
-def get_ai_response(prompt):
-    """调用阿里云 DeepSeek-V3.1 模型，获取AI回复"""
+def get_ai_reply(prompt):
+    """调用阿里通义千问qwen-flash模型，获取AI回复"""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}"
     }
 
     data = {
-        "model": "deepseek-v3.1",
-        "input": {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt # 这里使用函数传入的问题
-                }
-            ]
-        }
+        "model": "qwen-flash",
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt # 这里使用函数传入的问题
+            }
+        ],
+        "temperature": 0.5,
     }
 
     proxies = {
@@ -44,13 +48,11 @@ def get_ai_response(prompt):
     } if PROXY_URL else None
 
     try:
-        response = requests.post(API_URL, headers=headers, json=data, proxies=proxies)
-        # 检查回信的状态
+        response = requests.post(API_URL, headers=headers, json=data, proxies=proxies) 
+        # 发送请求，获取响应
         response.raise_for_status()  # 如果请求失败(如4xx或5xx错误)，这里会抛出异常
-        response_json = response.json()
-        assistant_reply = response_json()
-        # 解析阿里云DeepSeek返回的格式
-        assistant_reply = response_json["output"]["text"]
+        response_json = response.json() # 解析响应，获取AI的回答
+        assistant_reply = response_json["choices"][0]["message"]["content"] # 获取AI的回答
         return assistant_reply
     except requests.exceptions.RequestException as e:
         return  f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
@@ -74,9 +76,6 @@ while True:
         break # 跳出循环
 
     # 调用函数，获取AI的回答
-    ai_response = get_ai_response(user_input)
-    
-    # 打印AI的回答
-    print(f"AI助手：{ai_response}")
-    print("-"*30)
-
+    ai_reply = get_ai_reply(user_input) #调用函数，获取AI的回答
+    print(f"AI助手：{ai_reply}") #打印AI的回答
+    print("-"*30) #打印分隔线
