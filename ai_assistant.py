@@ -3,38 +3,49 @@ import requests
 import json
 from dotenv import load_dotenv
 
-# 在所有代码之前，运行这个函数，它会自动加载.env文件
-load_dotenv()
 
-# --- 1. 配置你的秘密钥匙和代理 ---
+load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.env文件
+
+# --- 1. 配置程序所需的变量 ---
+
 # 提示：为了安全，最好将API密钥存储在环境变量中。
-API_KEY = os.getenv("ALIYUN_API_KEY")
-# 如果你无法直接访问API，可以在这里设置你的代理服务器地址
-# 如果你可以直接访问，请将下面这行保留为None
+API_KEY = os.getenv("ALIYUN_API_KEY") 
+if not API_KEY: # 如果环境变量不存在
+    print("错误：未找到ALIYUN_API_KEY环境变量！") # 打印错误信息
+    print("请在.env文件中设置您的API密钥") # 打印提示信息
+    exit(1) # 退出程序
+
+# 如果无法直接访问API，可以在这里设置代理服务器地址
 PROXY_URL = None 
 
-if not API_KEY:
-    print("错误：未找到ALIYUN_API_KEY环境变量！")
-    print("请在.env文件中设置您的API密钥")
-    exit(1)
+MODEL_NAME = "qwen-flash"
 
-# --- 2. 设定我们要联系的“魔法塔”地址 ---
 # 阿里云 DeepSeek-V3.1 模型的API地址
-API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" 
 
-# --- 3. 将AI调用逻辑封装成一个函数 ---
-# 这样做的好处是代码更清晰，可以重复使用
+
+HISTORY_FILE = "data/chat_log.json" # 历史记录文件
+
+TEMPERARURE = 0.5
+
+data_folder = os.path.dirname(HISTORY_FILE) # 如果 data 文件夹不存在，就自动创建它
+if data_folder and not os.path.exists(data_folder):
+    os.makedirs(data_folder)
+
+# --- 2. 将AI调用逻辑封装成一个函数 ---
 def get_ai_reply(history):
-    """调用阿里通义千问qwen-flash模型，获取AI回复"""
+    """
+    接收一个完整的对话历史列表，返回AI的回答。
+    """
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}"
     }
 
     data = {
-        "model": "qwen-flash",
+        "model": MODEL_NAME,
         "messages": history,
-        "temperature": 0.5,
+        "temperature": TEMPERARURE,
     }
 
     proxies = {
@@ -47,7 +58,8 @@ def get_ai_reply(history):
         # 发送请求，获取响应
         response.raise_for_status()  # 如果请求失败(如4xx或5xx错误)，这里会抛出异常
         response_json = response.json() # 解析响应，获取AI的回答
-        assistant_reply = response_json["choices"][0]["message"]["content"] # 获取AI的回答
+        assistant_reply = response_json["choices"][0]["message"]["content"] 
+        # 获取AI的回答
         return assistant_reply
     except requests.exceptions.RequestException as e:
         return  f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
@@ -56,12 +68,20 @@ def get_ai_reply(history):
         error_details = response.text if 'response' in locals() else "无响应内容"
         return f"发生未知错误：{e}\n服务器响应：{error_details}"
 
-# --- 4. 主程序循环 ---
-print("AI小助手已启动！输入 'quit' 或 'exit' 来结束对话。")
-print("="*30)
+# --- 3. 主程序：实现永久记忆和循环对话 ---
 
-# 这是我们的“记忆芯片”！一个存储所有对话的列表
-conversation_history = []
+
+try:
+    with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+        # 【修改】程序启动时，尝试从文件加载历史记录
+        conversation_history = json.load(f)
+    print("AI小助手：已成功加载过往记忆，让我们继续上次的话题吧！")
+except FileNotFoundError:
+    # 如果文件不存在，说明是第一次运行，就创建一个空的列表
+    conversation_history = []
+    print("AI小助手：你好！一个新的旅程开始了。")
+
+print("="*30)
 
 # 使用 while True 创建一个无限循环
 while True:
@@ -70,8 +90,13 @@ while True:
 
     # 设置退出条件
     if user_input.lower() in ["quit", "exit","bye","goodbye"]:
-        print("AI小助手：再见啦！")
-        break # 跳出循环
+        try:
+            with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(conversation_history, f, ensure_ascii=False, indent=2)
+            print("AI小助手：记忆已保存，期待下次与你相见！")
+        except Exception as e:
+            print(f"AI小助手：哎呀，保存记忆时出错了：{e}")
+        break
 
     # 将用户的输入存入“记忆”
     conversation_history.append({"role": "user", "content": user_input})
