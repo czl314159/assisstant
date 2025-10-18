@@ -40,6 +40,7 @@ def get_ai_reply(history):
         "model": MODEL_NAME,
         "messages": history,
         "temperature": TEMPERARURE,
+        "stream": True, # <-- 1. 开启流式传输
     }
 
     proxies = {
@@ -48,42 +49,53 @@ def get_ai_reply(history):
     } if PROXY_URL else None
 
     try:
-        response = requests.post(API_URL, headers=headers, json=data, proxies=proxies) 
+        # 2. 发送请求时，也要开启stream
+        response = requests.post(API_URL, headers=headers, json=data, proxies=proxies, stream=True) 
         # 发送请求，获取响应
         response.raise_for_status()  # 如果请求失败(如4xx或5xx错误)，这里会抛出异常
-        response_json = response.json() # 解析响应，获取AI的回答
-        assistant_reply = response_json["choices"][0]["message"]["content"] 
-        # 获取AI的回答
-        return assistant_reply
+
+        # 3. 处理流式响应
+        for line in response.iter_lines():
+            if line:
+                decoded_line = line.decode('utf-8')
+                if decoded_line.startswith("data:"):
+                    # 移除 "data: " 前缀并解析JSON
+                    json_str = decoded_line[len("data: "):]
+                    if json_str.strip() == "[DONE]":
+                        break # 流结束
+                    response_json = json.loads(json_str)
+                    content = response_json["choices"][0]["delta"].get("content", "")
+                    yield content # 4. 使用 yield 返回一小块内容
     except requests.exceptions.RequestException as e:
-        return  f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
+        yield  f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
     except Exception as e:
         # 打印更详细的错误信息，包括返回的内容，方便调试
         error_details = response.text if 'response' in locals() else "无响应内容"
-        return f"发生未知错误：{e}\n服务器响应：{error_details}"
+        yield f"发生未知错误：{e}\n服务器响应：{error_details}"
 
 
-
-# --- 3. 主程序：实现永久记忆、循环对话和文件读取 ---
-#首先尝试从文件加载历史记录
-try:
-    with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-        conversation_history = json.load(f)
-    print("AI小助手：已成功加载过往记忆。")
-except FileNotFoundError:
-    # 如果文件不存在，说明是第一次运行，就创建一个空的列表
-    conversation_history = []
-    print("AI小助手：你好！一个新的旅程开始了。")
-
-#第二步：检查是否需要“注入”新文件作为上下文
-if len(sys.argv) > 1:
+# --- 3. 主程序执行入口 ---
+# 下面的代码只有在直接运行 `python ai_assistant.py` 时才会执行
+if __name__ == "__main__":
+    # 首先尝试从文件加载历史记录
     try:
-        file_path = sys.argv[1]
-        with open(file_path, 'r', encoding='utf-8') as f:
-            file_content = f.read()
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            conversation_history = json.load(f)
+        print("AI小助手：已成功加载过往记忆。")
+    except FileNotFoundError:
+        # 如果文件不存在，说明是第一次运行，就创建一个空的列表
+        conversation_history = []
+        print("AI小助手：你好！一个新的旅程开始了。")
 
-# 【核心】构建注入的提示，并将其追加到现有历史的末尾
-        injection_prompt = f"""
+    # 检查是否需要“注入”新文件作为上下文
+    if len(sys.argv) > 1:
+        try:
+            file_path = sys.argv[1]
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+
+            # 【核心】构建注入的提示，并将其追加到现有历史的末尾
+            injection_prompt = f"""
 好的，我现在为你提供一份新的文件内容。请你阅读并理解它，接下来可能会用到它。
 ---
 文件路径: {os.path.basename(file_path)}
@@ -92,51 +104,62 @@ if len(sys.argv) > 1:
 ---
 如果你已经阅读并理解了以上内容，请回复：“好的，新文件已阅读完毕，我们可以开始讨论了。”
 """
-        
-        conversation_history.append({"role": "user", "content": injection_prompt})
-        print(f"AI小助手：正在注入新文件: {os.path.basename(file_path)} ...")
+            
+            conversation_history.append({"role": "user", "content": injection_prompt})
+            print(f"AI小助手：正在注入新文件: {os.path.basename(file_path)} ...")
 
-        # 【关键】注入后，立即让AI进行一次“确认性回复”，并将回复也存入历史
-        ai_response = get_ai_reply(conversation_history)
-        conversation_history.append({"role": "assistant", "content": ai_response})
-        print(f"AI助手：{ai_response}")
+            # 【关键】注入后，立即让AI进行一次“确认性回复”，并将回复也存入历史
+            print(f"AI助手：", end="")
+            ai_response_content = ""
+            for chunk in get_ai_reply(conversation_history):
+                ai_response_content += chunk
+                print(chunk, end="", flush=True)
+            print() # 换行
 
-    except FileNotFoundError:
-        print(f"错误：找不到文件 {sys.argv[1]}。请检查路径是否正确。")
-        exit()
-    except Exception as e:
-        print(f"处理文件时发生错误：{e}")
-        exit()
+            conversation_history.append({"role": "assistant", "content": ai_response_content})
+            print(f"AI助手：{ai_response_content}")
 
-print("="*30)
-
-# 使用 while True 创建一个无限循环
-while True:
-    # 使用 input() 来获取你在终端输入的问题
-    user_input = input("你：")
-
-    # 设置退出条件
-    if user_input.lower() in ["quit", "exit","bye","goodbye"]:
-        try:
-            with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(conversation_history, f, ensure_ascii=False, indent=2)
-            print("AI小助手：记忆已保存，期待下次与你相见！")
+        except FileNotFoundError:
+            print(f"错误：找不到文件 {sys.argv[1]}。请检查路径是否正确。")
+            exit()
         except Exception as e:
-            print(f"AI小助手：哎呀，保存记忆时出错了：{e}")
-        break
+            print(f"处理文件时发生错误：{e}")
+            exit()
 
-    # 将用户的输入存入“记忆”
-    conversation_history.append({"role": "user", "content": user_input})
+    print("="*30)
 
-    # 2. 调用函数，把全部“记忆”都发给AI
-    ai_response = get_ai_reply(conversation_history)
+    # 使用 while True 创建一个无限循环
+    while True:
+        # 使用 input() 来获取你在终端输入的问题
+        user_input = input("你：")
 
-    # 3. 将AI的回答也存入“记忆”，形成完整的上下文
-    # (我们加一个判断，确保不会把错误信息也记下来)
-    if "请求失败" not in ai_response and "未知错误" not in ai_response:
-        conversation_history.append({"role": "assistant", "content": ai_response})
-    
-    # 4. 打印AI的回答
-    print(f"AI助手：{ai_response}") 
-    print("-"*30) #打印分隔线
+        # 设置退出条件
+        if user_input.lower() in ["quit", "exit","bye","goodbye"]:
+            try:
+                with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(conversation_history, f, ensure_ascii=False, indent=2)
+                print("AI小助手：记忆已保存，期待下次与你相见！")
+            except Exception as e:
+                print(f"AI小助手：哎呀，保存记忆时出错了：{e}")
+            break
 
+        # 将用户的输入存入“记忆”
+        conversation_history.append({"role": "user", "content": user_input})
+
+        # 2. 调用生成器函数，并迭代打印结果
+        print(f"AI助手：", end="")
+        full_response = ""
+        has_error = False
+        for chunk in get_ai_reply(conversation_history):
+            if "网络错误" in chunk or "未知错误" in chunk:
+                has_error = True
+            full_response += chunk
+            print(chunk, end="", flush=True)
+        print() # 结束时换行
+
+        # 3. 将AI的回答也存入“记忆”，形成完整的上下文
+        # (确保不会把错误信息也记下来)
+        if not has_error:
+            conversation_history.append({"role": "assistant", "content": full_response})
+        
+        print("-"*30) #打印分隔线
