@@ -28,24 +28,22 @@ def chat_response(user_input, chatbot_history, conversation_state):
     # 如果没有错误，将完整的AI回复添加到对话历史状态并保存
     if not has_error:
         conversation_state.append({"role": "assistant", "content": full_response})
-        # 注意：为了极致精简，这里移除了每次对话都保存历史的功能。
         # 历史记录将在程序退出时由用户手动或脚本的其他机制保存。
 
 # --- 3. 构建 Gradio 界面 ---
 
-with gr.Blocks(theme=gr.themes.Soft(), title="AI 助手") as demo:
+with gr.Blocks(theme=gr.themes.Soft(), title="AI 助手") as app:
     # 用于在后端存储完整对话历史（包含system role等）
-    # 注意：为了极致精简，这里不再从文件加载历史，而是从一个空列表开始。
     conversation_state = gr.State(value=[])
 
     gr.Markdown("# 🤖 AI 助手")
-    gr.Markdown("一个极简的智能对话助手。")
+    gr.Markdown("一个由阿里通义千问驱动的智能助手。")
 
     # 主要聊天界面
-    chatbot = gr.Chatbot(label="对话窗口", height=500)
+    chatbot = gr.Chatbot(label="通义千问", height=500)
     
     with gr.Row():
-        txt_input = gr.Textbox(show_label=False, placeholder="在这里输入你的问题...", scale=4)
+        txt_input = gr.Textbox(show_label=False, lines=3, placeholder="询问任何问题", scale=8)
         btn_submit = gr.Button("发送", variant="primary", scale=1)
 
     # --- 绑定事件 ---
@@ -57,4 +55,4 @@ with gr.Blocks(theme=gr.themes.Soft(), title="AI 助手") as demo:
 
 if __name__ == "__main__":
     # 启动Gradio应用
-    demo.launch()
+    app.launch()
