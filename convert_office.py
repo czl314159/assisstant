@@ -2,43 +2,65 @@ import os # 导入 os 模块以处理文件路径和检查文件是否存在，o
 import sys # 导入 sys 模块以处理命令行参数，sys的作用是提供对解释器使用或维护的一些变量和函数的访问
 from markitdown import MarkItDown # 导入 MarkItDown 库，而不是导入整个 markitdown 模块
 
-# --- 1. 从命令行参数获取文件路径 ---
-if len(sys.argv) < 2:
-    print("❌ 错误：请提供要转换的文件路径作为参数。")
-    print("用法: python convert_office.py <文件路径>")
-    sys.exit(1)
+# --- 1. 将转换逻辑封装成一个函数 ---
+def convert_file(file_path):
+    """
+    转换单个 Office 文件为 Markdown。
+    :param file_path: 要转换的单个文件的完整路径。
+    """
+    # 定义支持的文件扩展名，只处理这些类型的文件
+    supported_extensions = ('.docx', '.pptx', '.xlsx', '.pdf')
+    if not file_path.lower().endswith(supported_extensions):
+        # 如果文件类型不支持，就静默跳过，不打印信息，以免处理文件夹时输出过多无关内容
+        return
+        
+    try:
+        # 打印当前正在转换的文件名，os.path.basename可以从完整路径中提取出文件名
+        print(f"⏳ 正在转换: {os.path.basename(file_path)}...")
+        
+        # 初始化 MarkItDown 转换器 并执行转换
+        md = MarkItDown() # 创建 MarkItDown 实例
+        conversion_result = md.convert(file_path) # 调用convert方法
+        
+        # 生成输出文件名
+        base_name, _ = os.path.splitext(file_path) 
+        output_file_path = base_name + ".md" # 生成新的路径名
+        
+        # 写入 Markdown 文件
+        with open(output_file_path, "w", encoding="utf-8") as f:
+            f.write(conversion_result.text_content)
+        
+        print(f"✅ 转换成功 -> {os.path.basename(output_file_path)}")
+        
+    except Exception as e:
+        # 使用 f-string 格式化错误信息，更清晰
+        print(f"❌ 转换失败: {os.path.basename(file_path)}，错误： {e}")
 
-input_file_path = sys.argv[1]
-
-# 检查文件是否存在
-if not os.path.exists(input_file_path):
-    print(f"❌ 错误：文件不存在 -> {input_file_path}")
-    sys.exit(1)
-
-try:
-    print(f"开始转换文件：{input_file_path}...")
-
-    # --- 2. 初始化 MarkItDown 转换器 并执行转换---
-    md = MarkItDown() # 创建 MarkItDown 实例
-    conversion_result = md.convert(input_file_path) # 调用convert方法，并将结果（对象）的访问方式给到变量
-
-    # --- 3. 生成输出文件名 ---
-    # 将原始文件的扩展名替换为 .md
-    # os.path.splitext()将路径分为纯路径和扩展名并存入元组，然后赋值给两个变量，
-    # 其中-表示占位符，以为着我们不关心扩展名部分
-    base_name, _ = os.path.splitext(input_file_path) 
-    output_file_path = base_name + ".md" # 生成新的路径名
-
-    # --- 4. 写入 Markdown 文件 ---
-    # 请以 'utf-8' 编码，用写入模式（'w'） 打开路径为 output_file_path 的文件
-    # 并将其命名为 f。请在接下来的代码块中让我使用 f 来操作它，
-    # 并且无论发生什么，操作一结束就自动帮我把文件关好。
-    with open(output_file_path, "w", encoding="utf-8") as f:
-        f.write(conversion_result.text_content)
-
-    print("🎉 转换成功！")
-    print(f"Markdown 文件已保存到：{output_file_path}")
-
-except Exception as e:
-    # 使用 f-string 格式化错误信息，更清晰
-    print(f"❌ 转换失败，出现错误： {e}")
+# --- 主程序入口 ---
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("❌ 错误：请提供要转换的文件或文件夹路径作为参数。")
+        print("用法: python convert_office.py <文件或文件夹路径>")
+        sys.exit(1)
+    
+    input_path = sys.argv[1]
+    
+    # 检查路径是否存在
+    if not os.path.exists(input_path):
+        print(f"❌ 错误：路径不存在 -> {input_path}")
+        sys.exit(1)
+    
+    # 判断输入是文件还是文件夹
+    if os.path.isdir(input_path):
+        print(f"📁 开始处理文件夹: {input_path}")
+        # os.walk 会遍历文件夹下的所有子文件夹和文件
+        for root, dirs, files in os.walk(input_path):
+            for file in files:
+                full_path = os.path.join(root, file)
+                convert_file(full_path)
+        print("\n🎉 所有文件处理完毕！")
+    elif os.path.isfile(input_path):
+        # 如果是单个文件，直接调用转换函数
+        convert_file(input_path)
+    else:
+        print(f"❌ 错误：输入路径既不是文件也不是文件夹 -> {input_path}")
