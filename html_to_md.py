@@ -9,15 +9,63 @@ import os # 导入 os 库，用于处理文件路径
 import re # 导入 re 库，用于正则表达式操作，以净化文件名
 from bs4.element import Tag # 导入 Tag 类型用于类型提示
 from datetime import datetime # 导入 datetime 用于获取当前时间
+import json # 导入 json 库，用于解析 JSON-LD 数据
+import random # 导入 random 库，用于生成随机等待时间
 from readability import Document # 导入 readability 库，用于智能提取文章正文
 from urllib.parse import urljoin # 导入 urljoin 用于处理相对 URL 路径
 
+from dotenv import load_dotenv
+
+load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.env文件
+
 # --- 全局常量 ---
 # 定义一个常量字符串，用于在 Front Matter 之后、正文之前插入的总结提炼模板
-SUMMARY_TEMPLATE = "# 总结提炼\n\n\n---\n\n\n"
+SUMMARY_TEMPLATE = "\n## 总结提炼\n\n\n\n---\n\n"
 
 
-# --- 1. 通过playwright抓取HTML内容 ---
+# --- 1-1. 浏览器环境配置 ---
+async def _setup_browser_context(browser, url):
+    """
+    根据 URL 配置并返回一个合适的浏览器上下文（BrowserContext）。
+    目前主要用于为特定网站（如华尔街日报）加载登录 Cookies。
+    :param browser: 当前的 Playwright 浏览器实例。
+    :param url: 目标网页的 URL。
+    :return: 一个配置好的、全新的浏览器上下文对象。
+    """
+    # 定义一个标准的、真实的 User-Agent
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    # 定义一个常见的浏览器视口大小和语言，以完善浏览器指纹
+    viewport = {'width': 1920, 'height': 1080}
+    locale = 'en-US'
+    
+    # 检查是否为 wsj.com 的链接，并尝试加载已保存的会话状态
+    if "wsj.com" in url:
+        auth_state_path = os.environ.get('WSJ_AUTH_STATE_PATH')
+        if auth_state_path and os.path.exists(auth_state_path):
+            print(f"💡 检测到 WSJ 链接，正在从 '{auth_state_path}' 加载会话状态...")
+            try:
+                # 基于已保存的会话状态文件创建上下文，这将恢复登录状态
+                context = await browser.new_context(
+                    user_agent=user_agent,
+                    storage_state=auth_state_path,
+                    viewport=viewport,
+                    locale=locale
+                )
+                print("   ✅ 会话状态加载成功！")
+                return context
+            except Exception as e:
+                print(f"   ❌ 加载会话状态时发生错误: {e}。将以未登录状态继续。")
+    
+    # 如果不匹配任何特殊规则（WSJ网址），或加载失败，则创建一个新的、干净的上下文
+    print("   - 未匹配到特殊规则或加载状态失败，创建新的干净上下文。")
+    context = await browser.new_context(
+        user_agent=user_agent,
+        viewport=viewport,
+        locale=locale
+    )
+    return context
+
+# --- 1-2. 通过playwright抓取HTML内容 ---
 async def fetch_html_from_url(url: str) -> str | None:
     """
     使用 Playwright 异步抓取指定 URL 的 HTML 内容。
@@ -37,13 +85,12 @@ async def fetch_html_from_url(url: str) -> str | None:
             # 该方法返回一个Browser对象，赋值给browser
             browser = await p.chromium.launch(headless=True)
             print("✅ 浏览器已启动")
+            
+            # 调用辅助函数来获取一个配置好的浏览器上下文
+            context = await _setup_browser_context(browser, url)
 
-            # 在浏览器中创建一个新的页面（Page对象），并设置一个真实的 User-Agent 来模拟普通用户，防止基础的反爬虫检测。
-            # user_agent 是 browser.new_page 方法的一个关键字参数（keyword argument）。
-            page = await browser.new_page(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-            )
-            print("✅ 页面已创建，并设置了自定义 User-Agent")
+            # 我们直接从配置好的 context 创建新页面
+            page = await context.new_page()
             print(f"🌍 正在导航到: {url}")
 
             # 访问我们想要抓取的 URL，并等待页面加载完成
@@ -52,10 +99,51 @@ async def fetch_html_from_url(url: str) -> str | None:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             print("✅ 页面加载完成")
 
+            # --- 新增：处理 Cookie 同意弹窗 ---
+            print("🔎 正在检查并处理 Cookie 同意弹窗...")
+            # 定义一个包含多种常见“同意”按钮文本和选择器的列表
+            accept_selectors = [
+                '#onetrust-accept-btn-handler',  # OneTrust 平台的标准 ID
+                'button:has-text("Accept All")',
+                'button:has-text("I Accept")',
+                'button:has-text("Agree")',
+                'button:has-text("Accept")',
+            ]
+            # 将所有选择器合并为一个，Playwright 会尝试匹配第一个出现的元素
+            combined_selector = " , ".join(accept_selectors)
+            try:
+                # 尝试在 5 秒内找到并点击按钮。如果找不到，会抛出 TimeoutError。
+                await page.locator(combined_selector).first().click(timeout=5000)
+                print("   ✅ 已点击 Cookie 同意按钮。")
+            except Exception:
+                # 如果在超时时间内找不到按钮，或发生其他错误，则静默失败并继续。
+                # 这样做是安全的，因为大多数情况下弹窗可能不存在。
+                print("   - 未找到或无需处理 Cookie 同意弹窗。")
+
+            # --- 新增：模拟人类浏览行为 ---
+            print("🚶 正在模拟人类浏览行为...")
+            # 1. 模拟页面滚动，以触发懒加载内容并使行为更逼真
+            await page.evaluate("""
+                async () => {
+                    const distance = 100; // 每次滚动 100 像素
+                    const delay = 100;    // 每次滚动后等待 100 毫秒
+                    while (window.scrollY + window.innerHeight < document.body.scrollHeight) {
+                        window.scrollBy(0, distance);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            """)
+            print("   - 页面已滚动到底部。")
+            # 2. 在抓取内容前随机等待一段时间
+            short_wait = random.uniform(2, 5)
+            print(f"   - 随机等待 {short_wait:.2f} 秒...")
+            await asyncio.sleep(short_wait)
+
             # 获取当前页面的完整 HTML 内容（也就是html_content）
             html_content = await page.content()
             print("📄 已获取页面 HTML 内容")
 
+            await context.close() # 关闭上下文
             # 操作完成后，关闭浏览器
             await browser.close()
             print("✅ 浏览器已关闭")
@@ -65,7 +153,7 @@ async def fetch_html_from_url(url: str) -> str | None:
             return None
 
 
-# --- 2-1. 元数据提取 ---
+# --- 2. 内容处理 ---
 def _extract_head_metadata(soup: BeautifulSoup) -> dict:
     """从 HTML 的 <head> 部分提取通用的元数据。"""
     metadata = {}
@@ -127,7 +215,45 @@ def _process_generic_html(soup: BeautifulSoup, html_content: str) -> tuple[Tag |
     metadata = _extract_head_metadata(soup)
     content_element = None
 
-    # 策略1: 尝试预设的通用选择器列表来定位正文
+    # --- 新增策略1: 解析 JSON-LD 结构化数据 (最高优先级) ---
+    # 许多现代网站使用 JSON-LD 来提供机器可读的元数据，这通常是最准确的信息来源。
+    json_ld_scripts = soup.find_all('script', type='application/ld+json')
+    for script in json_ld_scripts:
+        try:
+            json_data = json.loads(script.string)
+
+            # JSON-LD 数据可以是单个字典，也可以是字典列表。我们统一处理。
+            items_to_process = []
+            if isinstance(json_data, list):
+                items_to_process.extend(json_data)
+            elif isinstance(json_data, dict):
+                items_to_process.append(json_data)
+
+            # 遍历所有找到的 JSON-LD 项目
+            for item in items_to_process:
+                if not isinstance(item, dict):
+                    continue
+
+                # 查找并提取发布日期
+                if not metadata.get("published") and item.get("datePublished"):
+                    metadata["published"] = item["datePublished"]
+                    print(f"   📊 从 JSON-LD 提取到发布日期: {metadata['published']}")
+                
+                # 查找并提取作者信息
+                if not metadata.get("author") and item.get("author"):
+                    author_data = item["author"]
+                    if isinstance(author_data, dict) and author_data.get("name"):
+                        metadata["author"] = author_data["name"]
+                    elif isinstance(author_data, list) and len(author_data) > 0 and author_data[0].get("name"):
+                        metadata["author"] = author_data[0]["name"]
+                    if metadata.get("author"):
+                        print(f"   📊 从 JSON-LD 提取到作者: {metadata['author']}")
+
+        except (json.JSONDecodeError, TypeError):
+            # 如果脚本内容不是有效的 JSON 或 script.string 为 None，则静默失败并继续
+            continue
+
+    # 策略2: 尝试预设的通用选择器列表来定位正文
     candidate_selectors = [
         'article', 'main', '#content', '#main-content', '#main',
         '.post-body', '.entry-content', '.article-body',
@@ -143,15 +269,17 @@ def _process_generic_html(soup: BeautifulSoup, html_content: str) -> tuple[Tag |
                 metadata["title"] = soup.title.string.strip()
             break
     
-    # 策略2: 如果预设规则失败，则使用 Readability 算法作为最终的正文提取尝试
+    # 策略3: 如果预设规则失败，则使用 Readability 算法作为最终的正文提取尝试
     if not content_element:
         print("   - 预设规则失败，尝试使用 Readability 算法进行智能提取...")
         try:
             doc = Document(html_content)
             # Readability 提取的标题和作者优先级更高，覆盖从 head 中获取的
-            metadata["title"] = doc.title() 
-            # 使用 getattr() 安全地访问 byline 属性，如果属性不存在则返回空字符串，以增强代码健壮性并解决 Pylance 警告
-            metadata["author"] = getattr(doc, 'byline', '') 
+            if not metadata.get("title"):
+                metadata["title"] = doc.title() 
+            # 仅当通过其他方式都未找到作者时，才使用 Readability 的 byline 作为备用
+            if not metadata.get("author"):
+                metadata["author"] = getattr(doc, 'byline', '') 
             main_content_html = doc.summary()
             content_element = BeautifulSoup(main_content_html, "html5lib")
             print("   ✅ Readability 算法成功提取到主要内容！")
@@ -318,7 +446,51 @@ def _extract_urls_from_file(file_path: str) -> list[str]:
         print(f"❌ 读取文件时发生错误: {e}")
         return []
 
-# --- 4. 主流程 ---
+async def handle_login(site: str):
+    """
+    处理特定网站的交互式登录流程，并保存会话状态。
+    :param site: 网站的标识符，例如 'wsj'。
+    """
+    site_configs = {
+        'wsj': {
+            'login_url': 'https://www.wsj.com/login',
+            'env_var': 'WSJ_AUTH_STATE_PATH'
+        }
+        # 未来可以添加其他网站的配置
+    }
+
+    if site not in site_configs:
+        print(f"❌ 不支持的登录网站: '{site}'。目前只支持 'wsj'。")
+        return
+
+    config = site_configs[site]
+    auth_file_path = os.environ.get(config['env_var'])
+
+    if not auth_file_path:
+        print(f"❌ 错误: 请先设置环境变量 '{config['env_var']}' 来指定会话状态文件的保存路径。")
+        return
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False) # 必须以非无头模式启动
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        await page.goto(config['login_url'])
+        
+        print("\n" + "="*50)
+        print("🚀 交互式登录流程已启动 🚀")
+        print(f"请在弹出的浏览器窗口中手动完成 '{site.upper()}' 的登录。")
+        print("登录成功后，请不要关闭浏览器，回到这里按下 'Enter' 键继续...")
+        print("="*50 + "\n")
+        
+        input() # 等待用户按 Enter
+
+        # 保存完整的会话状态到指定文件
+        await context.storage_state(path=auth_file_path)
+        print(f"✅ 会话状态已成功保存到: {auth_file_path}")
+
+        await browser.close()
+
 
 async def main():
     """
@@ -326,10 +498,21 @@ async def main():
     """
     # 使用 argparse 解析命令行参数
     parser = argparse.ArgumentParser(description="一个通用的网页内容抓取并转换为 Markdown 的工具。")
-    parser.add_argument("input_source", help="要抓取的目标网页 URL，或包含多个 URL 的文件路径。") # 位置参数，必需
+    parser.add_argument("input_source", nargs='?', default=None, help="要抓取的目标网页 URL，或包含多个 URL 的文件路径。")
     # 修改-o参数，使其默认值为None，以便我们判断用户是否真的输入了它
     parser.add_argument("-o", "--output", help="输出的 Markdown 文件路径。如果未提供，将根据网页标题自动生成。")
+    parser.add_argument("--login", help="启动交互式登录流程以保存特定网站的会话状态。例如: --login wsj")
     args = parser.parse_args()
+
+    # --- 模式调度 ---
+    if args.login:
+        # 如果用户指定了 --login 参数，则执行登录流程并退出
+        await handle_login(args.login)
+        return
+
+    if not args.input_source:
+        parser.error("错误: 必须提供一个 URL 或文件路径作为输入源，或者使用 --login 选项。")
+        return
 
     urls_to_process = []
     # 判断输入是文件还是 URL
@@ -357,12 +540,19 @@ async def main():
         front_matter = _create_front_matter(metadata, url)
 
         # 将 Front Matter 和正文内容拼接起来
-    final_content = f"{front_matter}{SUMMARY_TEMPLATE}{markdown_text}"
+        final_content = f"{front_matter}{SUMMARY_TEMPLATE}{markdown_text}"
 
         # 3. 保存
-    save_to_file(final_content, args.output, metadata.get("title", "Untitled"))
+        save_to_file(final_content, args.output, metadata.get("title", "Untitled"))
+        
+        # --- 新增：在处理多个链接时，增加一个较长的随机等待，以避免访问频率过快 ---
+        if len(urls_to_process) > 1 and i < len(urls_to_process) - 1:
+            long_wait = random.uniform(10, 30)
+            print(f"\n⏳ 批量处理间隔，随机等待 {long_wait:.2f} 秒...")
+            await asyncio.sleep(long_wait)
 
-# --- 5. 程序主入口 ---
+
+# --- 5. 程序入口 ---
 
 if __name__ == "__main__":
     # 因为我们的核心函数是异步的，所以需要使用 asyncio.run() 来启动它
