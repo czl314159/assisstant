@@ -6,6 +6,7 @@ from playwright.async_api import async_playwright # 从 playwright 库中导入�
 from bs4 import BeautifulSoup # 导入 BeautifulSoup 用于解析 HTML
 from markdownify import markdownify # 导入 markdownify 用于将 HTML 转为 Markdown
 import os # 导入 os 库，用于处理文件路径
+import re # 导入 re 库，用于正则表达式操作，以净化文件名
 
 # --- 2. 抓取HTML内容 ---
 
@@ -29,8 +30,12 @@ async def fetch_html_from_url(url: str) -> str | None:
             browser = await p.chromium.launch(headless=True)
             print("✅ 浏览器已启动")
 
-            # 在浏览器中创建一个新的页面（Page对象）
-            page = await browser.new_page()
+            # 在浏览器中创建一个新的页面（Page对象），并设置一个真实的 User-Agent 来模拟普通用户，防止基础的反爬虫检测。
+            # user_agent 是 browser.new_page 方法的一个关键字参数（keyword argument）。
+            page = await browser.new_page(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            )
+            print("✅ 页面已创建，并设置了自定义 User-Agent")
             print(f"🌍 正在导航到: {url}")
 
             # 访问我们想要抓取的 URL，并等待页面加载完成
@@ -53,13 +58,13 @@ async def fetch_html_from_url(url: str) -> str | None:
 
 # --- 2. 转化HTML内容为MD文件 ---
 
-def convert_html_to_markdown(html_content: str, selector: str | None, url: str) -> str | None:
+def convert_html_to_markdown(html_content: str, selector: str | None, url: str) -> tuple[str, str] | None:
     """
     从 HTML 字符串中提取特定内容并转换为 Markdown。
     :param html_content: 包含完整网页的 HTML 字符串。
     :param selector: 用于定位内容的 CSS 选择器。如果为 None，则触发自动检测。
     :param url: 原始网页的 URL，用于平台特定规则的判断。
-    :return: 成功时返回 Markdown 字符串，失败时返回 None。
+    :return: 成功时返回一个包含 (Markdown字符串, 页面标题) 的元组，失败时返回 None。
     """
     
     print("\n🔍 开始解析内容...")
@@ -69,6 +74,10 @@ def convert_html_to_markdown(html_content: str, selector: str | None, url: str) 
     # 你可以把它看作一个复杂的、嵌套的 Python 对象，它完整地映射了原始 HTML 的标签、属性和文本内容。
     soup = BeautifulSoup(html_content, "html5lib")
 
+    # 提取网页标题，如果找不到则使用默认值
+    page_title = "Untitled"
+    if soup.title and soup.title.string:
+        page_title = soup.title.string.strip()
     # 初始化内容元素变量
     content_element = None
 
@@ -147,8 +156,8 @@ def convert_html_to_markdown(html_content: str, selector: str | None, url: str) 
     # heading_style控制 markdownify 在将 HTML 标题标签（如 <h1>, <h2>, <h3> 等）转换为 Markdown 标题时所使用的样式。
     # strip=['a'] 参数可以在转换前移除所有<a>标签，以获得更干净的文本。
     markdown_text = markdownify(str(content_element), heading_style="ATX", strip=['a'])
-    print("🔄 已将 HTML 转换为 Markdown")
-    return markdown_text
+    print(f"🔄 已将 HTML (标题: {page_title}) 转换为 Markdown")
+    return markdown_text, page_title
 
 def save_to_file(content: str, output_path: str):
     """
@@ -164,6 +173,15 @@ def save_to_file(content: str, output_path: str):
     except Exception as e:
         print(f"❌ 保存文件时发生错误: {e}")
 
+def sanitize_filename(filename: str) -> str:
+    """
+    移除或替换文件名中的非法字符。
+    :param filename: 原始文件名（通常是网页标题）。
+    :return: 清理后可以安全用作文件名的字符串。
+    """
+    # 移除非法字符： \ / : * ? " < > |
+    return re.sub(r'[\\/*?:"<>|]', "", filename).strip()
+
 # --- 3. 主流程编排函数 ---
 
 async def main():
@@ -174,7 +192,8 @@ async def main():
     parser = argparse.ArgumentParser(description="一个通用的网页内容抓取并转换为 Markdown 的工具。")
     parser.add_argument("url", help="要抓取的目标网页 URL。") # 位置参数，必需
     parser.add_argument("-s", "--selector", help="手动指定CSS选择器。若不提供，则自动检测。") # 可选参数
-    parser.add_argument("-o", "--output", default="output.md", help="输出的 Markdown 文件路径 (默认为 output.md)。")
+    # 修改-o参数，使其默认值为None，以便我们判断用户是否真的输入了它
+    parser.add_argument("-o", "--output", help="输出的 Markdown 文件路径。如果未提供，将根据网页标题自动生成。")
     args = parser.parse_args()
 
     # 1. 提取
@@ -183,12 +202,22 @@ async def main():
         return
 
     # 2. 转换
-    markdown_text = convert_html_to_markdown(html_content, args.selector, args.url) # 将 URL 也传递进去
-    if not markdown_text:
+    conversion_result = convert_html_to_markdown(html_content, args.selector, args.url) # 将 URL 也传递进去
+    if not conversion_result:
         return
+    
+    markdown_text, page_title = conversion_result
+
+    # 决定最终的输出文件名
+    if args.output:
+        # 如果用户通过 -o 指定了文件名，则优先使用用户指定的
+        output_filename = args.output
+    else:
+        # 否则，使用从网页提取的标题来生成文件名
+        output_filename = sanitize_filename(page_title) + ".md"
 
     # 3. 保存
-    save_to_file(markdown_text, args.output)
+    save_to_file(markdown_text, output_filename)
 
 # --- 4. 程序主入口 ---
 
