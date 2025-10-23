@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup # 导入 BeautifulSoup 用于解析 HTML
 from markdownify import markdownify # 导入 markdownify 用于将 HTML 转为 Markdown
 import os # 导入 os 库，用于处理文件路径
 import re # 导入 re 库，用于正则表达式操作，以净化文件名
+from urllib.parse import urljoin # 导入 urljoin 用于处理相对 URL 路径
 
 # --- 2. 抓取HTML内容 ---
 
@@ -58,13 +59,12 @@ async def fetch_html_from_url(url: str) -> str | None:
 
 # --- 2. 转化HTML内容为MD文件 ---
 
-def convert_html_to_markdown(html_content: str, selector: str | None, url: str) -> tuple[str, str] | None:
+def convert_html_to_markdown(html_content: str, url: str) -> tuple[str, str] | None:
     """
     从 HTML 字符串中提取特定内容并转换为 Markdown。
     :param html_content: 包含完整网页的 HTML 字符串。
-    :param selector: 用于定位内容的 CSS 选择器。如果为 None，则触发自动检测。
     :param url: 原始网页的 URL，用于平台特定规则的判断。
-    :return: 成功时返回一个包含 (Markdown字符串, 页面标题) 的元组，失败时返回 None。
+    :return: 成功时返回一个包含 (Markdown 字符串, 页面标题) 的元组，失败时返回 None。
     """
     
     print("\n🔍 开始解析内容...")
@@ -74,37 +74,23 @@ def convert_html_to_markdown(html_content: str, selector: str | None, url: str) 
     # 你可以把它看作一个复杂的、嵌套的 Python 对象，它完整地映射了原始 HTML 的标签、属性和文本内容。
     soup = BeautifulSoup(html_content, "html5lib")
 
-    # 提取网页标题，如果找不到则使用默认值
-    page_title = "Untitled"
-    if soup.title and soup.title.string:
-        page_title = soup.title.string.strip()
+    # 初始化网页标题和内容元素变量
+    page_title = "Untitled" # 默认标题
     # 初始化内容元素变量
     content_element = None
 
-    # 步骤 1: 如果用户提供了选择器，则优先使用
-    if selector:
-        print(f"🔍 使用用户指定的选择器: '{selector}'")
-        # 在已经解析的 HTML 文档中，根据一个 CSS 选择器来查找并返回第一个匹配的 HTML 元素。
-        # bs4.element.Tag 对象：content_element 将是一个代表该 HTML 标签及其所有子内容的 Tag 对象。
-        content_element = soup.select_one(selector)
-        if not content_element:
-            print(f"❌ 未能找到匹配选择器 '{selector}' 的内容。请检查选择器是否正确，或网页结构是否已改变。")
-            # 即使指定了选择器但失败了，也直接返回，不再进行后续尝试
-            return None
-
-    # 步骤 2: 如果没有用户选择器，则检查是否有平台特定规则（例如微信公众号）
-    if not content_element and "mp.weixin.qq.com" in url:
+    # 步骤 1: 检查是否有平台特定规则（例如微信公众号）
+    if "mp.weixin.qq.com" in url:
         print("💡 检测到微信公众号文章，尝试使用专用选择器 '#js_content'...")
         wechat_selector = "#js_content"
         content_element = soup.select_one(wechat_selector)
         if content_element:
-            print(f"   ✅ 成功匹配到内容: '{wechat_selector}'")
-            selector = wechat_selector # 记录下成功的选择器，用于后续打印信息
+            print(f"   ✅ 成功匹配到内容: '{wechat_selector}'") # 仍然打印匹配到的选择器，但不再记录到变量
         else:
             # 如果微信专用选择器也失败了（虽然不太可能），则打印提示并继续进行通用检测
             print(f"   ❌ 未能通过 '{wechat_selector}' 找到内容，将继续通用检测...")
 
-    # 步骤 3: 如果以上方法都未成功，则启动通用的预设列表进行自动检测
+    # 步骤 2: 如果以上方法都未成功，则启动通用的预设列表进行自动检测
     if not content_element:
         print("🤖 启动通用预设规则进行检测...")
         # 定义一个高质量的候选选择器列表，按可能性从高到低排序
@@ -113,44 +99,47 @@ def convert_html_to_markdown(html_content: str, selector: str | None, url: str) 
             '.post-body', '.entry-content', '.article-body',
         ]
         for candidate in candidate_selectors:
+            # 在通用检测流程中，尝试获取页面的 <title> 作为标题
+            if soup.title and soup.title.string:
+                page_title = soup.title.string.strip()
+
             print(f"   尝试候选选择器: '{candidate}'...")
             content_element = soup.select_one(candidate)
-            if content_element:
-                print(f"   ✅ 成功匹配到内容: '{candidate}'")
-                selector = candidate # 记录下成功的选择器，用于后续打印信息
+            if content_element: # 仍然打印匹配到的选择器，但不再记录到变量
+                print(f"   ✅ 成功匹配到内容: '{candidate}'") 
                 break # 找到后立即跳出循环
     
-    # 步骤 4: 如果以上所有方法都失败了，则启动最终的智能分析
+    # 步骤 3: 如果所有自动检测都失败，则提示并退出
     if not content_element:
-        print("❌ 预设规则检测失败，启动最终智能分析模式...")
-        print("   🤖 正在分析页面结构，为您寻找可能的选择器...")
-        potential_selectors = set() # 使用集合来避免重复
-        # 遍历页面上所有的标签
-        for element in soup.find_all(True):
-            # 计算标签内纯文本的长度，忽略空白
-            text_length = len(element.get_text(strip=True))
-            # 我们只关心那些包含大量文本的容器
-            if text_length > 200: # 文本长度阈值可以根据需要调整
-                if element.get('id'):
-                    potential_selectors.add(f"#{element.get('id')}")
-                if element.get('class'):
-                    # 只选择看起来不像纯样式、更有意义的类名
-                    meaningful_classes = [cls for cls in element.get('class') if len(cls) > 4 and not cls.isdigit()]
-                    for cls in meaningful_classes:
-                        potential_selectors.add(f".{cls}")
-        
-        if potential_selectors:
-            print("\n   💡 建议：您可以尝试使用 `-s` 参数并配合以下可能有效的选择器之一再次运行：")
-            # 按长度对建议的选择器进行排序，通常更短的更具代表性
-            for ps in sorted(list(potential_selectors), key=len):
-                print(f"      -s \"{ps}\"")
-        else:
-            print("   😔 未能在页面上找到包含大量文本的区域。")
-        
+        print("❌ 自动检测失败，未能找到主要内容区域。")
         return None
 
-    print(f"✅ 成功找到内容元素 (匹配选择器: '{selector}')")
+    print("✅ 成功找到内容元素") # 不再显示匹配的选择器
 
+    # --- 新增：处理图片URL，确保它们是绝对路径并处理懒加载 ---
+    # 遍历所有 img 标签
+    for img in content_element.find_all('img'):
+        # 1. 处理懒加载属性：检查是否有 data-src 或 data-original 等属性，并将其值赋给 src
+        # 微信公众号文章通常使用 data-src 来存储真实的图片 URL
+        if 'data-src' in img.attrs:
+            # 如果 data-src 存在，就用它的值来更新 src 属性
+            img['src'] = img['data-src']
+            # 移除 data-src 属性，避免冗余，并且让 HTML 更“干净”
+            del img['data-src'] 
+        elif 'data-original' in img.attrs: # 某些网站可能使用 data-original
+            img['src'] = img['data-original']
+            del img['data-original']
+        # 可以根据需要添加其他常见的懒加载属性，例如 _src 等
+
+        # 2. 确保 src 属性是绝对路径
+        # 只有当 src 属性存在且不是绝对路径（即不以 http:// 或 https:// 开头）时才进行处理
+        if 'src' in img.attrs and not img['src'].startswith(('http://', 'https://')):
+            # 使用 urljoin 将相对路径与页面的基础 URL 组合，生成绝对路径
+            # urljoin 能够智能处理各种相对路径情况
+            img['src'] = urljoin(url, img['src'])
+            # print(f"   💡 修正图片URL: {img['src']}") # 调试用，可以取消注释查看修正过程
+
+    # --- 结束图片URL处理 ---
 
     # 将 HTML 元素转换为 Markdown文档字符串，markdownify()函数
     # heading_style控制 markdownify 在将 HTML 标题标签（如 <h1>, <h2>, <h3> 等）转换为 Markdown 标题时所使用的样式。
@@ -159,17 +148,38 @@ def convert_html_to_markdown(html_content: str, selector: str | None, url: str) 
     print(f"🔄 已将 HTML (标题: {page_title}) 转换为 Markdown")
     return markdown_text, page_title
 
-def save_to_file(content: str, output_path: str):
+def save_to_file(content: str, user_specified_path: str | None, page_title: str):
     """
     将字符串内容保存到指定路径的文件中。
     :param content: 要保存的字符串内容。
-    :param output_path: 目标文件路径。
+    :param user_specified_path: 用户通过命令行指定的输出路径，可能为 None。
+    :param page_title: 从网页中提取的标题，用于在用户未指定路径时生成文件名。
     """
     try:
+        # 净化后的网页标题作为基础文件名
+        sanitized_title_filename = sanitize_filename(page_title) + ".md"
 
+        if user_specified_path: # 用户指定了 -o 参数
+            # 判断用户指定的是一个目录还是一个完整的文件路径
+            if os.path.isdir(user_specified_path) or user_specified_path.endswith(('/', '\\')):
+                # 如果用户指定的是一个目录，则将标题作为文件名与目录组合
+                output_path = os.path.join(user_specified_path, sanitized_title_filename)
+            else:
+                # 如果用户指定的是一个完整的文件路径（包含文件名），则直接使用
+                output_path = user_specified_path
+        else:
+            # 用户未指定 -o 参数，则在当前目录使用标题作为文件名
+            output_path = sanitized_title_filename
+
+        # 确保输出目录存在
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # 使用 with open() 语句确保文件操作的安全性和资源的自动释放
         with open(output_path, "w", encoding="utf-8") as f: 
             f.write(content)
-        print(f"💾 文件已成功保存到: {os.path.abspath(output_path)}")
+        print(f"💾 文件已成功保存到: {os.path.abspath(output_path)}") # 使用 os.path.abspath 获取绝对路径，让输出更明确
     except Exception as e:
         print(f"❌ 保存文件时发生错误: {e}")
 
@@ -191,7 +201,6 @@ async def main():
     # 使用 argparse 解析命令行参数
     parser = argparse.ArgumentParser(description="一个通用的网页内容抓取并转换为 Markdown 的工具。")
     parser.add_argument("url", help="要抓取的目标网页 URL。") # 位置参数，必需
-    parser.add_argument("-s", "--selector", help="手动指定CSS选择器。若不提供，则自动检测。") # 可选参数
     # 修改-o参数，使其默认值为None，以便我们判断用户是否真的输入了它
     parser.add_argument("-o", "--output", help="输出的 Markdown 文件路径。如果未提供，将根据网页标题自动生成。")
     args = parser.parse_args()
@@ -202,22 +211,14 @@ async def main():
         return
 
     # 2. 转换
-    conversion_result = convert_html_to_markdown(html_content, args.selector, args.url) # 将 URL 也传递进去
+    conversion_result = convert_html_to_markdown(html_content, args.url) # 现在只传递 HTML 内容和 URL
     if not conversion_result:
         return
     
     markdown_text, page_title = conversion_result
 
-    # 决定最终的输出文件名
-    if args.output:
-        # 如果用户通过 -o 指定了文件名，则优先使用用户指定的
-        output_filename = args.output
-    else:
-        # 否则，使用从网页提取的标题来生成文件名
-        output_filename = sanitize_filename(page_title) + ".md"
-
     # 3. 保存
-    save_to_file(markdown_text, output_filename)
+    save_to_file(markdown_text, args.output, page_title)
 
 # --- 4. 程序主入口 ---
 
