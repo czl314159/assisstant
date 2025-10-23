@@ -1,3 +1,44 @@
+"""
+脚本名称: HTML 到 Markdown 转换器 (html_to_md.py)
+
+功能描述:
+    这是一个强大的网页内容抓取和转换工具。它能够从指定的 URL 获取网页内容，
+    智能提取主要文章内容，并将其转换为干净的 Markdown 格式。
+    转换后的 Markdown 文件会包含 YAML Front Matter，用于知识管理，
+    并支持保存和重用登录会话，以便访问需要认证的网站（例如《华尔街日报》）。
+    脚本可以处理单个 URL，也可以从文件中读取多个 URL 进行批量处理。
+
+使用方法:
+    1.  **转换单个 URL**:
+        `python html_to_md.py "https://example.com/article"`
+        -   可选参数 `-o` 或 `--output` 指定输出目录或完整文件名。
+            例如: `python html_to_md.py "https://example.com/article" -o /path/to/output/`
+            或 `python html_to_md.py "https://example.com/article" -o /path/to/output/my_article.md`
+
+    2.  **从包含多个 URL 的文件转换**:
+        `python html_to_md.py /path/to/your/links.txt`
+        -   `links.txt` 文件中每行一个 URL。
+
+    3.  **启动交互式登录流程并保存会话状态**:
+        `python html_to_md.py --login wsj`
+        -   这会打开一个浏览器窗口，让你手动登录。登录成功后，会话状态将保存到 `.env` 中配置的路径。
+
+配置:
+    -   **WSJ 登录状态路径**: 如果需要保存《华尔街日报》的登录状态，请在 `.env` 文件中设置
+        `WSJ_AUTH_STATE_PATH` 环境变量，例如: `WSJ_AUTH_STATE_PATH="/path/to/your/wsj_auth_state.json"`
+
+依赖:
+    -   `playwright` (需要额外运行 `playwright install` 安装浏览器驱动)
+    -   `beautifulsoup4`
+    -   `markdownify`
+    -   `readability-lxml`
+    -   `html5lib`
+    -   `python-dotenv`
+    -   `asyncio`
+    -   `argparse`
+    -   `os`, `re`, `datetime`, `json`, `random`, `urllib.parse` (Python 内置库)
+"""
+
 
 # 导入我们需要的库
 import asyncio  # 导入 asyncio 库，因为 Playwright 是基于异步 I/O 的，需要它来运行
@@ -23,7 +64,7 @@ load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.
 SUMMARY_TEMPLATE = "\n## 总结提炼\n\n\n\n---\n\n"
 
 
-# --- 1-1. 浏览器环境配置 ---
+# --- 1. 配置浏览器上下文 ---
 async def _setup_browser_context(browser, url):
     """
     根据 URL 配置并返回一个合适的浏览器上下文（BrowserContext）。
@@ -65,7 +106,7 @@ async def _setup_browser_context(browser, url):
     )
     return context
 
-# --- 1-2. 通过playwright抓取HTML内容 ---
+# --- 2. 使用playwright抓取HTML内容 ---
 async def fetch_html_from_url(url: str) -> str | None:
     """
     使用 Playwright 异步抓取指定 URL 的 HTML 内容。
@@ -153,7 +194,7 @@ async def fetch_html_from_url(url: str) -> str | None:
             return None
 
 
-# --- 2. 内容处理 ---
+# --- 3. 提取通用元数据 ---
 def _extract_head_metadata(soup: BeautifulSoup) -> dict:
     """从 HTML 的 <head> 部分提取通用的元数据。"""
     metadata = {}
@@ -176,6 +217,7 @@ def _extract_head_metadata(soup: BeautifulSoup) -> dict:
                     metadata[key] = str(value).strip()
     return metadata
 
+# --- 4. 处理微信公众号HTML ---
 def _process_wechat_html(soup: BeautifulSoup) -> tuple[Tag | None, dict]:
     """专门处理微信公众号文章的HTML，提取元数据和正文。"""
     print("💡 检测到微信公众号文章，启动专用处理器...")
@@ -207,7 +249,7 @@ def _process_wechat_html(soup: BeautifulSoup) -> tuple[Tag | None, dict]:
         print(f"   ❌ 未能通过 '{wechat_selector}' 找到内容。")
     return content_element, metadata
 
-
+# --- 5. 处理通用HTML ---
 def _process_generic_html(soup: BeautifulSoup, html_content: str) -> tuple[Tag | None, dict]:
     """处理通用网页的HTML，通过多种策略提取元数据和正文。"""
     print("🤖 未匹配到特定规则，启动通用处理器...")
@@ -219,39 +261,42 @@ def _process_generic_html(soup: BeautifulSoup, html_content: str) -> tuple[Tag |
     # 许多现代网站使用 JSON-LD 来提供机器可读的元数据，这通常是最准确的信息来源。
     json_ld_scripts = soup.find_all('script', type='application/ld+json')
     for script in json_ld_scripts:
-        try:
-            json_data = json.loads(script.string)
+        # 检查 script 标签内是否有内容，因为 .string 在标签为空或包含子标签时可能返回 None
+        if script.string:
+            try:
+                json_data = json.loads(script.string)
 
-            # JSON-LD 数据可以是单个字典，也可以是字典列表。我们统一处理。
-            items_to_process = []
-            if isinstance(json_data, list):
-                items_to_process.extend(json_data)
-            elif isinstance(json_data, dict):
-                items_to_process.append(json_data)
+                # JSON-LD 数据可以是单个字典，也可以是字典列表。我们统一处理。
+                items_to_process = []
+                if isinstance(json_data, list):
+                    items_to_process.extend(json_data)
+                elif isinstance(json_data, dict):
+                    items_to_process.append(json_data)
 
-            # 遍历所有找到的 JSON-LD 项目
-            for item in items_to_process:
-                if not isinstance(item, dict):
-                    continue
+                # 遍历所有找到的 JSON-LD 项目
+                for item in items_to_process:
+                    if not isinstance(item, dict):
+                        continue
 
-                # 查找并提取发布日期
-                if not metadata.get("published") and item.get("datePublished"):
-                    metadata["published"] = item["datePublished"]
-                    print(f"   📊 从 JSON-LD 提取到发布日期: {metadata['published']}")
-                
-                # 查找并提取作者信息
-                if not metadata.get("author") and item.get("author"):
-                    author_data = item["author"]
-                    if isinstance(author_data, dict) and author_data.get("name"):
-                        metadata["author"] = author_data["name"]
-                    elif isinstance(author_data, list) and len(author_data) > 0 and author_data[0].get("name"):
-                        metadata["author"] = author_data[0]["name"]
-                    if metadata.get("author"):
-                        print(f"   📊 从 JSON-LD 提取到作者: {metadata['author']}")
+                    # 查找并提取发布日期
+                    if not metadata.get("published") and item.get("datePublished"):
+                        metadata["published"] = item["datePublished"]
+                        print(f"   📊 从 JSON-LD 提取到发布日期: {metadata['published']}")
+                    
+                    # 查找并提取作者信息
+                    if not metadata.get("author") and item.get("author"):
+                        author_data = item["author"]
+                        if isinstance(author_data, dict) and author_data.get("name"):
+                            metadata["author"] = author_data["name"]
+                        elif isinstance(author_data, list) and len(author_data) > 0 and author_data[0].get("name"):
+                            metadata["author"] = author_data[0]["name"]
+                        if metadata.get("author"):
+                            print(f"   📊 从 JSON-LD 提取到作者: {metadata['author']}")
 
-        except (json.JSONDecodeError, TypeError):
-            # 如果脚本内容不是有效的 JSON 或 script.string 为 None，则静默失败并继续
-            continue
+            except (json.JSONDecodeError, TypeError):
+                # 如果脚本内容不是有效的 JSON，则静默失败并继续
+                # TypeError 也会被捕获，以防万一，尽管我们已经检查了 script.string
+                continue
 
     # 策略2: 尝试预设的通用选择器列表来定位正文
     candidate_selectors = [
@@ -289,7 +334,7 @@ def _process_generic_html(soup: BeautifulSoup, html_content: str) -> tuple[Tag |
     return content_element, metadata
 
 
-# --- 2-2. 内容后处理 ---
+# --- 6. 内容后处理 ---
 def _post_process_content(content_element: Tag, url: str):
     """对提取出的内容进行后处理，主要是修正图片URL。"""
     # 遍历所有 img 标签
@@ -319,7 +364,7 @@ def _post_process_content(content_element: Tag, url: str):
             # print(f"   💡 修正图片URL: {img['src']}") # 调试用，可以取消注释查看修正过程
 
 
-# --- 2-3. 调度与转换 ---
+# --- 7. 调度HTML转换 ---
 def convert_html_to_markdown(html_content: str, url: str) -> tuple[str, dict] | None:
     """
     从 HTML 字符串中提取特定内容并转换为 Markdown。这是一个调度函数。
@@ -362,6 +407,7 @@ def convert_html_to_markdown(html_content: str, url: str) -> tuple[str, dict] | 
     print(f"🔄 已将 HTML (标题: {metadata.get('title', 'N/A')}) 转换为 Markdown")
     return markdown_text, metadata
 
+# --- 8. 创建Front Matter ---
 def _create_front_matter(metadata: dict, url: str) -> str:
     """根据提取的元数据生成 YAML Front Matter 字符串。"""
     # 使用 isoformat() 获取符合 ISO 8601 标准的日期时间字符串
@@ -388,7 +434,7 @@ def _create_front_matter(metadata: dict, url: str) -> str:
     return "\n".join(yaml_lines)
 
 
-# --- 3. 保存到文件 ---
+# --- 9. 保存内容到文件 ---
 def save_to_file(content: str, user_specified_path: str | None, page_title: str):
     """
     将字符串内容保存到指定路径的文件中。
@@ -424,6 +470,7 @@ def save_to_file(content: str, user_specified_path: str | None, page_title: str)
     except Exception as e:
         print(f"❌ 保存文件时发生错误: {e}")
 
+# --- 10. 从文件提取URL ---
 def _extract_urls_from_file(file_path: str) -> list[str]:
     """
     从给定的文件中读取内容，并使用正则表达式提取所有 URL。
@@ -446,6 +493,7 @@ def _extract_urls_from_file(file_path: str) -> list[str]:
         print(f"❌ 读取文件时发生错误: {e}")
         return []
 
+# --- 11. 处理交互式登录 ---
 async def handle_login(site: str):
     """
     处理特定网站的交互式登录流程，并保存会话状态。
@@ -492,6 +540,7 @@ async def handle_login(site: str):
         await browser.close()
 
 
+# --- 12. 主程序入口 ---
 async def main():
     """
     程序的主异步入口，负责编排整个抓取、转换和保存的工作流。
@@ -550,9 +599,6 @@ async def main():
             long_wait = random.uniform(10, 30)
             print(f"\n⏳ 批量处理间隔，随机等待 {long_wait:.2f} 秒...")
             await asyncio.sleep(long_wait)
-
-
-# --- 5. 程序入口 ---
 
 if __name__ == "__main__":
     # 因为我们的核心函数是异步的，所以需要使用 asyncio.run() 来启动它

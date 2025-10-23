@@ -1,3 +1,25 @@
+"""
+脚本名称: Office 和 PDF 到 Markdown 转换器 (office_to_md.py)
+
+功能描述:
+    此脚本是一个实用工具，用于将 Microsoft Office 文档（.docx, .pptx, .xlsx）
+    以及 PDF 文件转换为 Markdown 格式。它支持处理单个文件或指定文件夹中的所有支持文件。
+
+使用方法:
+    在终端中运行，并提供要转换的文件或文件夹的路径作为参数：
+
+    1.  **转换单个文件**:
+        `python office_to_md.py /path/to/your/document.docx`
+        `python office_to_md.py /path/to/your/presentation.pptx`
+        `python office_to_md.py /path/to/your/spreadsheet.xlsx`
+        `python office_to_md.py /path/to/your/report.pdf`
+
+    2.  **转换文件夹中的所有支持文件**:
+        `python office_to_md.py /path/to/your/documents_folder`
+
+依赖:
+    -   `markitdown`
+"""
 import os # 导入 os 模块以处理文件路径和检查文件是否存在，os 的作用是提供与操作系统进行交互的功能
 import sys # 导入 sys 模块以处理命令行参数，sys的作用是提供对解释器使用或维护的一些变量和函数的访问
 from markitdown import MarkItDown # 导入 MarkItDown 库，而不是导入整个 markitdown 模块
