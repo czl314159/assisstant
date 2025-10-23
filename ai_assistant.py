@@ -43,7 +43,7 @@ def get_ai_reply(history):
         "stream": True, # <-- 1. 开启流式传输
     }
 
-    proxies = {
+    proxies:dict[str,str] | None= {
     "http": PROXY_URL,
     "https": PROXY_URL,
     } if PROXY_URL else None
