@@ -72,8 +72,8 @@ python ai_assistant.py --gui
 
 ### Run Utilities
 ```bash
-# Excel processor (requires 工作簿1.xlsx in root)
-python excel_process.py
+# Excel processor
+python excel_process.py <path_to_excel_file> [sheet_name_or_index]
 
 # Office converter
 python convert_office.py <path_to_file_or_folder>

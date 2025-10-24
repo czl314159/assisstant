@@ -32,7 +32,7 @@
 
 ### 4. Excel 数据处理器 (`excel_process.py`)
 
-一个用于处理 Excel 文件的脚本。它读取电子表格，根据特定列中的值复制行，并将结果导出到新的 Excel 文件中。
+一个灵活的命令行工具，用于处理 Excel 文件。它能够读取指定的工作表，根据“新增记录”列中的数值复制对应的行，并将处理后的结果导出到一个新的 Excel 文件中。
 
 ## 设置与安装
 
@@ -112,9 +112,21 @@ python convert_office.py /path/to/your/file_or_folder
 
 ### Excel 数据处理器
 
-1.  将名为 `工作簿1.xlsx` 的 Excel 文件放在根目录中。
-2.  运行脚本：
+该脚本通过命令行运行，需要提供待处理的 Excel 文件路径作为参数。
+
+-   **基本用法（默认处理第一个工作表）：**
     ```bash
-    python excel_process.py
+    python excel_process.py /path/to/your/data.xlsx
     ```
-3.  输出将另存为 `处理后的工作簿.xlsx`。
+
+-   **指定工作表名称：**
+    ```bash
+    python excel_process.py /path/to/your/data.xlsx "7月销售数据"
+    ```
+
+-   **指定工作表索引（0 代表第一个工作表）：**
+    ```bash
+    python excel_process.py /path/to/your/data.xlsx 0
+    ```
+
+处理后的文件将自动保存在与源文件相同的目录下，并以 `_processed` 后缀命名（例如，`data_processed.xlsx`）。

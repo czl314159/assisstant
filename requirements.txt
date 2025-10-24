@@ -1,0 +1,25 @@
+# --------------------------------------------------------------------------
+# Python 学习与实用工具脚本 - 依赖项文件
+# --------------------------------------------------------------------------
+# 使用此文件来安装项目所需的所有库。
+# 运行命令: pip install -r requirements.txt
+# --------------------------------------------------------------------------
+
+# 用于 AI 助手 (ai_assistant.py)
+gradio # 用于构建 Web UI 界面
+
+# 用于 HTML 到 Markdown 转换器 (html_to_md.py)
+playwright       # 强大的浏览器自动化工具，用于抓取动态网页内容
+beautifulsoup4   # 经典 HTML/XML 解析库，用于提取和操作网页元素
+markdownify      # 将 HTML 转换为 Markdown 的核心库
+readability-lxml # 智能提取文章正文内容的算法库
+html5lib         # 一个健壮的 HTML 解析器，供 BeautifulSoup 使用
+
+# 用于 Office 和 PDF 到 Markdown 转换器 (convert_office.py)
+markitdown # 将 Office 文档和 PDF 转换为 Markdown 的工具
+
+# 用于 Excel 数据处理器 (excel_process.py)
+pandas # 强大的数据分析和处理库，用于读写和操作 Excel 文件
+
+# 通用工具
+python-dotenv # 用于从 .env 文件中加载环境变量（如 API 密钥）
