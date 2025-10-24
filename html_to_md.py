@@ -61,7 +61,7 @@ load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.
 
 # --- 全局常量 ---
 # 定义一个常量字符串，用于在 Front Matter 之后、正文之前插入的总结提炼模板
-SUMMARY_TEMPLATE = "\n## 总结提炼\n\n\n\n---\n\n"
+SUMMARY_TEMPLATE = "\n# 总结提炼\n\n\n\n---\n\n"
 
 
 # --- 1. 配置浏览器上下文 ---
@@ -166,11 +166,33 @@ async def fetch_html_from_url(url: str) -> str | None:
             # 1. 模拟页面滚动，以触发懒加载内容并使行为更逼真
             await page.evaluate("""
                 async () => {
-                    const distance = 100; // 每次滚动 100 像素
-                    const delay = 100;    // 每次滚动后等待 100 毫秒
-                    while (window.scrollY + window.innerHeight < document.body.scrollHeight) {
+                    const distance = 100; // 每次滚动的距离
+                    const delay = 100;    // 每次滚动后的延迟
+
+                    // --- 新增：健壮的滚动退出机制，防止无限循环 ---
+                    const maxScrolls = 100;      // 1. 设置最大滚动次数，作为硬性退出条件
+                    let scrolls = 0;
+                    let lastScrollY = -1;
+                    let stuckCount = 0;
+                    const maxStuckCount = 5; // 2. 如果连续5次滚动位置不变，则认为到达底部
+
+                    while (scrolls < maxScrolls && stuckCount < maxStuckCount) {
+                        const currentScrollY = window.scrollY;
                         window.scrollBy(0, distance);
                         await new Promise(resolve => setTimeout(resolve, delay));
+                        scrolls++;
+
+                        // 检查滚动位置是否变化
+                        if (window.scrollY === currentScrollY) {
+                            stuckCount++;
+                        } else {
+                            stuckCount = 0; // 如果滚动了，就重置计数器
+                        }
+
+                        // 这是一个额外的、快速退出的条件，如果已到达文档底部则立即停止
+                        if (window.scrollY + window.innerHeight >= document.body.scrollHeight) {
+                            break;
+                        }
                     }
                 }
             """)
@@ -522,6 +544,11 @@ async def handle_login(site: str):
         browser = await p.chromium.launch(headless=False) # 必须以非无头模式启动
         context = await browser.new_context()
         page = await context.new_page()
+
+        # --- 核心修改：注入脚本以隐藏自动化特征 ---
+        # 某些网站会检测 navigator.webdriver 属性来判断是否为自动化浏览器。
+        # 我们在页面加载任何脚本之前，通过 add_init_script 将这个属性的值伪装成 false。
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false})")
 
         await page.goto(config['login_url'])
         
