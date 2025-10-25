@@ -7,6 +7,8 @@
     CLI 模式下具有对话历史持久化功能，Web UI 模式则提供更友好的可视化交互。
     此外，CLI 模式还支持将外部文件内容注入到对话上下文中，以便 AI 进行更深入的分析和讨论。
 
+    注意：原有的批量处理文件夹功能已被移至 `note_process/batch_summarize.py` 脚本。
+
 使用方法:
     1.  **CLI 模式 (默认)**:
         在终端中运行: `python ai_assistant.py`
@@ -41,13 +43,13 @@
     -   确保已安装所有依赖库 (`pip install -r requirements.txt`)。
 """
 import os
-import requests
 import json
 import sys
 import gradio as gr
-import re # 导入 re 模块用于正则表达式操作
 import argparse
 from dotenv import load_dotenv
+# 从 note_process 文件夹下的 ai_service.py 文件中导入 AIAssistantService 类
+from ai_service import AIAssistantService
 
 load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.env文件
 
@@ -73,74 +75,11 @@ if not MODEL_NAME:
     exit(1)
 
 HISTORY_FILE = "data/chat_log.json" # 历史记录文件路径
-TEMPERARURE = float(os.getenv("TEMPERARURE",0.5))
+TEMPERATURE = float(os.getenv("TEMPERATURE",0.5))
 
-SUMMARY_HEADING_MARKER = "# 总结提炼\n" # 标题标记，后面跟一个换行符
-
-# 编译正则表达式，用于查找 SUMMARY_HEADING_MARKER 作为插入点。re.DOTALL 允许 '.' 匹配换行符。
-SUMMARY_PATTERN = re.compile(rf"({re.escape(SUMMARY_HEADING_MARKER)})", re.DOTALL)
 data_folder = os.path.dirname(HISTORY_FILE) # 如果 data 文件夹不存在，就自动创建它
 if data_folder and not os.path.exists(data_folder):
     os.makedirs(data_folder)
-
-# --- 2. AI 服务类 ---
-class AIAssistantService:
-    """
-    封装与 AI 模型交互的所有逻辑，包括 API 请求、流式响应处理和错误管理。
-    """
-    # --- 2.1. 初始化服务 ---
-    def __init__(self, api_key, model_name, api_url, temperature):
-        """
-        初始化 AI 服务实例。
-
-        :param api_key: 用于 API 认证的密钥。
-        :param model_name: 要使用的 AI 模型名称。
-        :param api_url: API 的终端节点 URL。
-        :param temperature: 控制生成文本的随机性。
-        """
-        self.api_key = api_key
-        self.model_name = model_name
-        self.api_url = api_url
-        self.temperature = temperature
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-    # --- 2.2. 获取流式回复 ---
-    def stream_chat_completion(self, history):
-        """
-        接收一个完整的对话历史列表，以生成器的方式流式返回 AI 的回答。
-
-        :param history: 一个包含对话消息的列表。
-        :return: 一个生成器，逐块(chunk)产生 AI 的回复内容。
-        """
-        data = {
-            "model": self.model_name,
-            "messages": history,
-            "temperature": self.temperature,
-            "stream": True,
-        }
-
-        try:
-            response = requests.post(self.api_url, headers=self.headers, json=data, stream=True)
-            response.raise_for_status()
-
-            for line in response.iter_lines():
-                if line:
-                    decoded_line = line.decode('utf-8')
-                    if decoded_line.startswith("data:"):
-                        json_str = decoded_line[len("data: "):]
-                        if json_str.strip() == "[DONE]":
-                            break
-                        response_json = json.loads(json_str)
-                        content = response_json["choices"][0]["delta"].get("content", "")
-                        yield content
-        except requests.exceptions.RequestException as e:
-            yield f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
-        except Exception as e:
-            error_details = response.text if 'response' in locals() else "无响应内容"
-            yield f"发生未知错误：{e}\n服务器响应：{error_details}"
 
 # --- 3. 核心功能封装 ---
 
@@ -172,85 +111,6 @@ def save_history(history, file_path):
     except Exception as e:
         print(f"AI小助手：哎呀，保存记忆时出错了：{e}")
 
-# --- 批处理文件夹总结功能 ---
-def process_folder_for_summaries(folder_path, ai_service, prompt_template):
-    """
-    遍历指定文件夹下的所有Markdown/文本文件，查找总结提炼区域，
-    如果该区域为空，则调用AI进行总结并写入文件。
-    :param folder_path: 要处理的文件夹路径。
-    :param ai_service: AI 服务实例。
-    :param prompt_template: 用于生成AI请求的提示词模板。
-    """
-    print(f"📁 检测到文件夹输入：'{folder_path}'。将进入批处理模式，自动总结文件。")
-    processed_count = 0 # 统计成功处理（原地更新）的文件数量
-    skipped_count = 0
-    error_count = 0
-
-    if "{content}" not in prompt_template:
-        print("⚠️ 警告：提供的提示词模板中未找到 '{content}' 占位符。AI可能无法获取文件内容。")
-
-    for root, _, files in os.walk(folder_path):
-        for file_name in files:
-            # 只处理 Markdown 和文本文件
-            if not file_name.lower().endswith(('.md')):
-                continue
-
-            file_path = os.path.join(root, file_name)
-            print(f"\n--- 正在处理文件: {file_name} ---")
-
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                # 使用正则表达式查找总结提炼区域
-                match = SUMMARY_PATTERN.search(content)
-
-                if not match: # 如果连标题标记都找不到，就跳过
-                    print(f"   ⏭️ 跳过 '{file_name}'：未找到总结提炼的标题标记 ('{SUMMARY_HEADING_MARKER.strip()}')。")
-                    skipped_count += 1
-                    continue
-
-                # 准备发送给 AI 的提示词
-                summary_prompt = prompt_template.format(content=content) # 将文件内容填充到提示词模板中
-                # 为 AI 调用创建一个临时的对话历史，因为总结不需要之前的上下文
-                temp_history = [{"role": "user", "content": summary_prompt}]
-                
-                print("   🤖 正在请求 AI 生成内容...")
-                ai_summary = ""
-                for chunk in ai_service.stream_chat_completion(temp_history):
-                    ai_summary += chunk
-                    # 可以在这里打印 chunk 以提供实时反馈，但批处理模式下通常不需要
-                    # print(chunk, end="", flush=True)
-
-                if not ai_summary.strip():
-                    print(f"   ⏭️ AI 未返回有效内容，跳过 '{file_name}'。请检查提示词或文件内容。")
-                    skipped_count += 1
-                    continue
-
-                # 直接在 SUMMARY_HEADING_MARKER 之后插入 AI 总结
-                # r"\1" 是正则表达式匹配到的 SUMMARY_HEADING_MARKER 本身
-                # ai_summary.strip() 是 AI 生成的总结内容
-                # "\n\n" 是为了在插入的总结和原有内容之间保持两行空行，以符合Markdown格式和可读性
-                new_content = SUMMARY_PATTERN.sub(r"\1" + ai_summary.strip() + "\n", content, 1)
-
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                print(f"   ✅ 成功插入内容并更新文件: '{file_name}'")
-                processed_count += 1
-                    
-            except Exception as e:
-                print(f"   ❌ 处理文件 '{file_name}' 时发生错误: {e}")
-                error_count += 1
-                continue
-    
-    print("\n--- 批处理完成 ---")
-    total_files = processed_count + skipped_count + error_count
-    print(f"总计扫描文件: {total_files}")
-    print(f"成功插入内容并更新: {processed_count}")
-    print(f"跳过 (无标记区域): {skipped_count}")
-    print(f"处理失败: {error_count}")
-    print("------------------")
-    
 # --- 4. 命令行界面 (CLI) 启动逻辑 ---
 def start_cli():
     """启动命令行版本的 AI 助手。"""
@@ -273,18 +133,6 @@ def start_cli():
         default=None,
         help="指定要加载到上下文中的文件路径。"
     )
-    # 创建一个互斥组，确保 --prompt 和 --prompt-file 不会同时使用
-    prompt_group = parser.add_mutually_exclusive_group()
-    prompt_group.add_argument(
-        '--prompt',
-        dest='prompt_string',
-        help="直接在命令行中提供提示词模板。请使用 '{content}' 作为文件内容的占位符。"
-    )
-    prompt_group.add_argument(
-        '--prompt-file',
-        dest='prompt_file_path',
-        help="从指定文件中加载提示词模板。文件中应包含 '{content}' 占位符。"
-    )
     # 从 sys.argv 中过滤掉脚本名和 '--gui' 标志，只解析与CLI相关的参数
     cli_args = [arg for arg in sys.argv[1:] if arg != '--gui']
     args = parser.parse_args(cli_args)
@@ -297,7 +145,7 @@ def start_cli():
         api_key=API_KEY,
         model_name=MODEL_NAME,
         api_url=API_URL,
-        temperature=TEMPERARURE,
+        temperature=TEMPERATURE,
     )
 
     # 根据记忆模式初始化对话历史
@@ -310,32 +158,12 @@ def start_cli():
     file_context = None
     if args.file_path:
         if os.path.isdir(args.file_path):
-            # --- 批处理模式的提示词处理 ---
-            prompt_template = ""
-            if args.prompt_string:
-                prompt_template = args.prompt_string
-            elif args.prompt_file_path:
-                try:
-                    with open(args.prompt_file_path, 'r', encoding='utf-8') as f:
-                        prompt_template = f.read()
-                except Exception as e:
-                    print(f"❌ 读取提示词文件 '{args.prompt_file_path}' 时出错: {e}")
-                    sys.exit(1)
-            else:
-                # 如果用户未提供提示词，则进入交互式输入
-                print("\n批处理模式需要一个提示词模板。")
-                print("模板中必须包含 '{content}' 占位符，它将被替换为每个文件的实际内容。")
-                default_prompt = "请你仔细阅读以下文本，并提炼出主要内容和关键信息，生成一份简洁的总结。请直接输出总结内容，不要包含任何额外的前缀或后缀。\n\n文本内容:\n```\n{content}\n```"
-                print(f"\n示例 (默认模板):\n---\n{default_prompt}\n---")
-                
-                user_prompt = input("\n请输入你的提示词模板 (直接按 Enter 使用默认模板): \n")
-                if user_prompt.strip():
-                    prompt_template = user_prompt
-                else:
-                    prompt_template = default_prompt
-            
-            process_folder_for_summaries(args.file_path, ai_service, prompt_template)
-            sys.exit(0) # 批处理完成后退出程序
+            # 如果输入的是文件夹，则提示用户使用新脚本
+            print("📁 检测到文件夹输入。")
+            print("此功能已移至新脚本 `note_process/batch_summarize.py`。")
+            print("请使用以下命令运行批量总结功能:")
+            print(f"   python note_process/batch_summarize.py \"{args.file_path}\"")
+            sys.exit(0)
         elif os.path.isfile(args.file_path):
             # 如果是文件，加载文件内容作为对话上下文
             try:
@@ -423,7 +251,7 @@ def start_gui():
         api_key=API_KEY,
         model_name=MODEL_NAME,
         api_url=API_URL,
-        temperature=TEMPERARURE,
+        temperature=TEMPERATURE,
     )
 
     # --- 为 Gradio UI 编写的接口函数 ---
