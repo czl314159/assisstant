@@ -199,7 +199,7 @@ async def fetch_html_from_url(url: str) -> str | None:
             """)
             print("   - 页面已滚动到底部。")
             # 2. 在抓取内容前随机等待一段时间
-            short_wait = random.uniform(2, 5)
+            short_wait = random.uniform(5, 15)
             print(f"   - 随机等待 {short_wait:.2f} 秒...")
             await asyncio.sleep(short_wait)
 
@@ -563,15 +563,33 @@ async def handle_login(site: str):
         print(f"❌ 错误: 请先设置环境变量 '{config['env_var']}' 来指定会话状态文件的保存路径。")
         return
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False) # 必须以非无头模式启动
-        context = await browser.new_context()
-        page = await context.new_page()
+    print("\n--- 准备连接本地浏览器 ---")
+    print("请确保已按以下步骤操作：")
+    print("1. 完全关闭所有正在运行的 Chrome 浏览器实例。")
+    print("2. 从命令行以调试模式启动 Chrome，例如：")
+    print(r'   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222')
+    print("3. 保持该 Chrome 窗口开启。")
+    print("---------------------------\n")
 
-        # --- 核心修改：注入脚本以隐藏自动化特征 ---
-        # 某些网站会检测 navigator.webdriver 属性来判断是否为自动化浏览器。
-        # 我们在页面加载任何脚本之前，通过 add_init_script 将这个属性的值伪装成 false。
-        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false})")
+    async with async_playwright() as p:
+        try:
+            # --- 核心修改：不再启动新浏览器，而是连接到已在调试模式下运行的本地 Chrome 实例 ---
+            # 这可以利用你真实的浏览器指纹、扩展和已有的 Cookie，极大地提高登录成功率。
+            # 使用 127.0.0.1 代替 localhost，以避免潜在的 IPv6 解析问题。
+            browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            # 获取本地浏览器已存在的默认上下文，而不是创建一个新的。这样才能使用你的登录状态和扩展。
+            context = browser.contexts[0]
+            # 在现有浏览器中打开一个新标签页
+            page = await context.new_page()
+        except Exception as e:
+            # 捕获连接失败的异常，并提供友好的错误提示
+            print("❌ 连接本地浏览器失败！")
+            print("错误详情:", e)
+            print("\n请确认您已按照以下步骤正确操作：")
+            print("1. 【重要】已完全关闭所有正在运行的 Chrome 浏览器实例。")
+            print("2. 已通过命令行启动了带有远程调试端口的 Chrome。")
+            print("3. 确保命令行中使用的端口号 (例如 9222) 与脚本中的端口号一致。")
+            return # 优雅地退出函数
 
         await page.goto(config['login_url'])
         
@@ -587,7 +605,8 @@ async def handle_login(site: str):
         await context.storage_state(path=auth_file_path)
         print(f"✅ 会话状态已成功保存到: {auth_file_path}")
 
-        await browser.close()
+        # 因为我们是连接到外部浏览器，所以不应该由脚本关闭它。
+        # await browser.close()
 
 
 # --- 12. 主程序入口 ---
@@ -646,7 +665,7 @@ async def main():
         
         # --- 新增：在处理多个链接时，增加一个较长的随机等待，以避免访问频率过快 ---
         if len(urls_to_process) > 1 and i < len(urls_to_process) - 1:
-            long_wait = random.uniform(10, 30)
+            long_wait = random.uniform(5, 15)
             print(f"\n⏳ 批量处理间隔，随机等待 {long_wait:.2f} 秒...")
             await asyncio.sleep(long_wait)
 
