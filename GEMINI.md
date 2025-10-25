@@ -1,145 +1,74 @@
 # GEMINI.md
 
-This file provides guidance when working with code in this repository.
-
 ## Project Overview
 
-This is a Python learning repository containing individual utility scripts and learning exercises. The repository is not a single application but a collection of standalone tools and examples for Python education and practical utilities.
+This project is a collection of Python scripts designed to provide a variety of utilities, with a focus on AI-powered assistance, data processing, and note management. The core of the project is an AI assistant that can be interacted with via a command-line interface (CLI) or a web-based graphical user interface (GUI).
 
-## Core Components
+The project is structured into several modules, each with a specific purpose:
 
-### AI Assistant (`ai_assistant.py`)
-The main application is a conversational AI chatbot with two interfaces:
-- **CLI interface**: Terminal-based chatbot with persistent memory.
-- **Web UI**: Gradio-based web interface for the same chatbot.
+- **`ai_assistant.py`**: The main entry point for the AI assistant.
+- **`ai_service.py`**: A service module that handles communication with the AI model's API.
+- **`data_process/`**: Scripts for processing data, such as the `excel_process.py` for working with Excel files.
+- **`note_process/`**: A collection of scripts for managing and processing notes, including tools for converting documents to Markdown, summarizing content, and modifying file metadata.
 
-**Architecture**:
-- Uses Aliyun's Qwen-flash model via OpenAI-compatible API.
-- Implements streaming responses for real-time interaction.
-- Maintains conversation history in `data/chat_log.json`.
-- Supports file injection: can load external files into conversation context via command-line argument.
+## Building and Running
 
-**Key features**:
-- Persistent conversation memory across sessions (CLI only).
-- Streaming text generation (uses generators and `yield`).
-- Environment-based configuration (requires `.env` file with `ALIYUN_API_KEY`).
-- Error handling for network and API failures.
+### 1. Installation
 
-### Utility Scripts
+To get started, you need to install the required Python packages and set up the necessary browser components for web scraping.
 
-**`convert_office.py`**: Office-to-Markdown converter
-- Converts .docx, .pptx, .xlsx, and .pdf files to Markdown.
-- Uses the `markitdown` library.
-
-**`excel_process.py`**: Excel row duplication tool
-- Reads from `工作簿1.xlsx`.
-- Duplicates rows based on "新增记录" column value.
-- Outputs to `处理后的工作簿.xlsx`.
-
-**`html_to_md.py`**: HTML-to-Markdown converter
-- Fetches content from a URL and converts it to Markdown.
-- Supports single URLs or a file containing multiple URLs.
-- Can save login sessions for sites requiring authentication (e.g., Wall Street Journal).
-- Uses `playwright`, `beautifulsoup4`, `markdownify`, and `readability-lxml`.
-
-## Running the Project
-
-### Setup Environment
 ```bash
-# Install dependencies
-pip install requests python-dotenv markitdown pandas gradio playwright beautifulsoup4 markdownify readability-lxml
+# Install Python dependencies
+pip install -r requirements.txt
 
-# Install Playwright browsers
+# Install Playwright browsers (for html_to_md.py)
 playwright install
-
-# Create .env file with API key
-echo "ALIYUN_API_KEY=your_api_key_here" > .env
 ```
 
-### Run AI Assistant
-```bash
-# Basic CLI usage
-python ai_assistant.py
+### 2. Configuration
 
-# With file injection (load file into context)
-python ai_assistant.py path/to/file.txt
+The project uses a `.env` file to manage environment variables, such as API keys and file paths. Before running the scripts, create a `.env` file in the root of the project and add the following variables:
 
-# To run the Web UI
-python ai_assistant.py --gui
-
-# Exit CLI: type "quit", "exit", "bye", or "goodbye"
+```
+ALIYUN_API_KEY="your_api_key"
+ALIYUN_API_URL="your_api_url"
+ALIYUN_MODEL_NAME="your_model_name"
+WSJ_AUTH_STATE_PATH="/path/to/your/wsj_auth_state.json"
+OBSIDIAN_VAULT_ROOT="/path/to/your/obsidian_vault"
 ```
 
-### Run Utilities
-```bash
-# Excel processor
-python excel_process.py <path_to_excel_file> [sheet_name_or_index]
+### 3. Running the Scripts
 
-# Office converter
-python convert_office.py <path_to_file_or_folder>
+The scripts in this project are designed to be run from the command line. Here are some examples of how to run the main scripts:
 
-# HTML to Markdown converter
-python html_to_md.py <URL_or_file_path>
-```
+- **AI Assistant (CLI):**
+  ```bash
+  python ai_assistant.py
+  ```
 
-## Important Configuration Details
+- **AI Assistant (Web UI):**
+  ```bash
+  python ai_assistant.py --gui
+  ```
 
-### API Configuration (`ai_assistant.py`)
-- **API_KEY**: Must be set in `.env` file as `ALIYUN_API_KEY`.
-- **MODEL_NAME**: Currently set to "qwen-flash".
-- **TEMPERATURE**: Set to 0.5.
-- **PROXY_URL**: Set to `None` (can be configured if needed).
-- **HISTORY_FILE**: `data/chat_log.json` (auto-created).
+- **HTML to Markdown Converter:**
+  ```bash
+  python note_process/html_to_md.py "<URL>"
+  ```
 
-### Data Persistence
-- The `data/` folder is auto-created on first run.
-- Chat history is saved to `data/chat_log.json` when exiting the CLI.
-- Web UI does NOT persist conversations.
+- **Office to Markdown Converter:**
+  ```bash
+  python note_process/office_to_md.py <file_or_folder_path>
+  ```
 
-## Architecture Notes
+- **Excel Data Processor:**
+  ```bash
+  python data_process/excel_process.py <excel_file_path>
+  ```
 
-### Streaming Response Pattern
-Both AI interfaces use Python generators for streaming:
-```python
-for chunk in get_ai_reply(conversation_state):
-    # Process each chunk as it arrives
-    full_response += chunk
-```
+## Development Conventions
 
-This pattern is used consistently across both CLI and Web UI implementations.
-
-### State Management
-- **CLI**: Full conversation history persisted to JSON file.
-- **Web UI**: Uses Gradio's `gr.State` for in-memory state management during a session.
-- Both maintain conversation as a list of `{"role": "user/assistant", "content": "..."}` objects.
-
-### Error Handling Strategy
-- Network errors are caught and displayed to the user with a prefix.
-- Errors contain "网络错误" or "未知错误" markers.
-- Responses with errors are NOT saved to the conversation history.
-- The system checks for error markers before persisting assistant responses.
-
-## File Structure
-```
-.
-├── ai_assistant.py       # CLI and Gradio chatbot
-├── convert_office.py    # Office converter
-├── excel_process.py     # Excel utility
-├── html_to_md.py        # HTML to Markdown converter
-├── .env                 # API keys (not in git)
-├── data/                # Runtime data (not in git)
-│   └── chat_log.json   # Conversation history
-└── GEMINI.md            # This file
-```
-
-## Dependencies
-Core libraries:
-- `requests`: HTTP client for API calls.
-- `python-dotenv`: Environment variable management.
-- `gradio`: Web UI framework.
-- `pandas`: Excel processing.
-- `markitdown`: Office document conversion.
-- `playwright`: For web scraping and browser automation.
-- `beautifulsoup4`: For parsing HTML.
-- `markdownify`: For converting HTML to Markdown.
-- `readability-lxml`: For extracting the main content from a webpage.
+- **Modularity**: The project is organized into modules with specific responsibilities, such as the `ai_service.py` module for handling AI API interactions.
+- **Configuration**: Environment variables are used to separate configuration from code, which is a good practice for managing sensitive information like API keys.
+- **Documentation**: The code is well-documented with docstrings and comments, which makes it easier to understand and maintain.
+- **Command-Line Interface**: The scripts are designed to be run from the command line, with arguments for specifying input and options.
