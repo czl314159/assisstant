@@ -74,7 +74,8 @@ async def _setup_browser_context(browser, url):
     :return: 一个配置好的、全新的浏览器上下文对象。
     """
     # 定义一个标准的、真实的 User-Agent
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    # user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
     # 定义一个常见的浏览器视口大小和语言，以完善浏览器指纹
     viewport = {'width': 1920, 'height': 1080}
     locale = 'en-US'
@@ -485,10 +486,32 @@ def save_to_file(content: str, user_specified_path: str | None, page_title: str)
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
+        # --- 新增：文件名冲突处理 ---
+        # 在写入文件前，检查路径是否已存在。如果存在，则自动重命名。
+        final_output_path = output_path
+        counter = 1
+        # 使用一个 while 循环来查找一个不重复的文件名
+        while os.path.exists(final_output_path):
+            # 如果文件已存在，我们会生成一个新的文件名。
+            # 首先，将原始路径拆分为基本名称和扩展名。
+            # 例如，"my_article.md" -> ("my_article", ".md")
+            base_name, extension = os.path.splitext(output_path)
+            
+            # 然后，创建一个新的候选文件名，格式为 "基本名称-计数器.扩展名"
+            # 例如，"my_article-1.md", "my_article-2.md", ...
+            final_output_path = f"{base_name}-{counter}{extension}"
+            
+            # 增加计数器，为下一次可能的循环做准备
+            counter += 1
+        
+        if final_output_path != output_path:
+            print(f"   ⚠️ 文件名冲突，自动重命名为: {os.path.basename(final_output_path)}")
+
         # 使用 with open() 语句确保文件操作的安全性和资源的自动释放
-        with open(output_path, "w", encoding="utf-8") as f: 
+        # 使用最终确定的、保证唯一的路径来保存文件
+        with open(final_output_path, "w", encoding="utf-8") as f: 
             f.write(content)
-        print(f"💾 文件已成功保存到: {os.path.abspath(output_path)}") # 使用 os.path.abspath 获取绝对路径，让输出更明确
+        print(f"💾 文件已成功保存到: {os.path.abspath(final_output_path)}") # 使用 os.path.abspath 获取绝对路径，让输出更明确
     except Exception as e:
         print(f"❌ 保存文件时发生错误: {e}")
 

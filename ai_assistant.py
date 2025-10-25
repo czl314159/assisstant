@@ -60,16 +60,23 @@ if not API_KEY:
     print("请在.env文件中设置您的API密钥") 
     exit(1) 
 
-# 如果无法直接访问API，可以在这里设置代理服务器地址
-PROXY_URL = None 
-MODEL_NAME = "qwen-flash"
-API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" 
-HISTORY_FILE = "data/chat_log.json" # 历史记录文件路径
-TEMPERARURE = 0.5
+API_URL = os.getenv("ALIYUN_API_URL")
+if not API_URL:
+    print("错误：未找到ALIYUN_API_URL环境变量！")
+    print("请在.env文件中设置您的API地址")
+    exit(1)
 
-# 定义总结提炼的标记，与 html_to_md.py 中的 SUMMARY_TEMPLATE 保持一致
-SUMMARY_HEADING_MARKER = "# 总结提炼\n\n" # 标题标记，后面跟两个换行符
-SUMMARY_SEPARATOR_MARKER = "\n---" # 分隔符标记，前面跟一个换行符
+MODEL_NAME = os.getenv("ALIYUN_MODEL_NAME")
+if not MODEL_NAME:
+    print("警告：未找到ALIYUN_MODEL_NAME环境变量！")
+    print("请在.env文件中设置您的模型名称")
+    exit(1)
+
+HISTORY_FILE = "data/chat_log.json" # 历史记录文件路径
+TEMPERARURE = float(os.getenv("TEMPERARURE",0.5))
+
+SUMMARY_HEADING_MARKER = "# 总结提炼\n" # 标题标记，后面跟一个换行符
+
 # 编译正则表达式，用于查找 SUMMARY_HEADING_MARKER 作为插入点。re.DOTALL 允许 '.' 匹配换行符。
 SUMMARY_PATTERN = re.compile(rf"({re.escape(SUMMARY_HEADING_MARKER)})", re.DOTALL)
 data_folder = os.path.dirname(HISTORY_FILE) # 如果 data 文件夹不存在，就自动创建它
@@ -82,7 +89,7 @@ class AIAssistantService:
     封装与 AI 模型交互的所有逻辑，包括 API 请求、流式响应处理和错误管理。
     """
     # --- 2.1. 初始化服务 ---
-    def __init__(self, api_key, model_name, api_url, temperature, proxy_url=None):
+    def __init__(self, api_key, model_name, api_url, temperature):
         """
         初始化 AI 服务实例。
 
@@ -90,13 +97,11 @@ class AIAssistantService:
         :param model_name: 要使用的 AI 模型名称。
         :param api_url: API 的终端节点 URL。
         :param temperature: 控制生成文本的随机性。
-        :param proxy_url: (可选) 用于网络请求的代理服务器地址。
         """
         self.api_key = api_key
         self.model_name = model_name
         self.api_url = api_url
         self.temperature = temperature
-        self.proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
@@ -118,7 +123,7 @@ class AIAssistantService:
         }
 
         try:
-            response = requests.post(self.api_url, headers=self.headers, json=data, proxies=self.proxies, stream=True)
+            response = requests.post(self.api_url, headers=self.headers, json=data, stream=True)
             response.raise_for_status()
 
             for line in response.iter_lines():
@@ -172,7 +177,6 @@ def process_folder_for_summaries(folder_path, ai_service, prompt_template):
     """
     遍历指定文件夹下的所有Markdown/文本文件，查找总结提炼区域，
     如果该区域为空，则调用AI进行总结并写入文件。
-    如果该区域已有内容，则将新总结写入一个新文件。
     :param folder_path: 要处理的文件夹路径。
     :param ai_service: AI 服务实例。
     :param prompt_template: 用于生成AI请求的提示词模板。
@@ -223,11 +227,11 @@ def process_folder_for_summaries(folder_path, ai_service, prompt_template):
                     skipped_count += 1
                     continue
 
-                # 简化逻辑：直接在 SUMMARY_HEADING_MARKER 之后插入 AI 总结
+                # 直接在 SUMMARY_HEADING_MARKER 之后插入 AI 总结
                 # r"\1" 是正则表达式匹配到的 SUMMARY_HEADING_MARKER 本身
                 # ai_summary.strip() 是 AI 生成的总结内容
                 # "\n\n" 是为了在插入的总结和原有内容之间保持两行空行，以符合Markdown格式和可读性
-                new_content = SUMMARY_PATTERN.sub(r"\1" + ai_summary.strip() + "\n\n", content, 1)
+                new_content = SUMMARY_PATTERN.sub(r"\1" + ai_summary.strip() + "\n", content, 1)
 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(new_content)
@@ -294,7 +298,6 @@ def start_cli():
         model_name=MODEL_NAME,
         api_url=API_URL,
         temperature=TEMPERARURE,
-        proxy_url=PROXY_URL
     )
 
     # 根据记忆模式初始化对话历史
@@ -421,7 +424,6 @@ def start_gui():
         model_name=MODEL_NAME,
         api_url=API_URL,
         temperature=TEMPERARURE,
-        proxy_url=PROXY_URL
     )
 
     # --- 为 Gradio UI 编写的接口函数 ---
