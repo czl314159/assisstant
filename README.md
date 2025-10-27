@@ -66,9 +66,6 @@ ALIYUN_API_KEY="your_api_key_here"
 ALIYUN_API_URL="your_api_url_here"
 ALIYUN_MODEL_NAME="your_model_name_here"
 
-# HTML 转 Markdown 登录状态保存路径
-WSJ_AUTH_STATE_PATH="/path/to/your/wsj_auth_state.json"
-
 # 周报汇总脚本的 Obsidian 库根路径
 OBSIDIAN_VAULT_ROOT="/path/to/your/obsidian_vault"
 ```
