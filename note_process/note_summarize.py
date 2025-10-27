@@ -118,8 +118,16 @@ def process_folder_for_summaries(folder_path, ai_service, prompt_template):
                     skipped_count += 1
                     continue
 
-                new_content = SUMMARY_PATTERN.sub(r"\1" + ai_summary.strip() + "\n", content, 1)
+                # --- 新增：将模型名称附加到总结末尾 ---
+                # 1. 从 AI 服务实例中获取当前使用的模型名称
+                model_name = ai_service.model_name
+                # 2. 创建一个格式化的、包含模型信息的 Markdown 字符串
+                model_info_str = f"\n\n> 总结由 *{model_name}* 生成"
+                # 3. 将 AI 总结、模型信息和必要的换行符拼接成最终要插入的内容
+                content_to_insert = ai_summary.strip() + model_info_str + "\n"
 
+                # 使用正则表达式替换，将拼接好的完整内容插入到“# 总结提炼”标题下方
+                new_content = SUMMARY_PATTERN.sub(r"\1" + content_to_insert, content, 1)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(new_content)
                 print(f"   ✅ 成功插入内容并更新文件。")

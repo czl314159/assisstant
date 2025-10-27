@@ -61,7 +61,7 @@ load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.
 
 # --- 全局常量 ---
 # 定义一个常量字符串，用于在 Front Matter 之后、正文之前插入的总结提炼模板
-SUMMARY_TEMPLATE = "\n# 总结提炼\n\n\n\n---\n\n"
+SUMMARY_TEMPLATE = "\n# 总结提炼\n\n\n---\n\n"
 
 
 # --- 1. 配置浏览器上下文 ---
