@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 Message = Dict[str, str]
 
@@ -22,7 +22,7 @@ class MemoryStore:
         self.root = Path(root_dir)               # 转成 Path 对象，便于后续操作
         self.root.mkdir(parents=True, exist_ok=True)  # 若目录不存在则创建（支持多级）
 
-    def load(self, session_id: str) -> List[Message]:
+    def load(self, session_id: Optional[str]) -> List[Message]:
         """
         根据会话 ID 读取历史记录。
 
@@ -34,7 +34,7 @@ class MemoryStore:
             return self._load_file(target)
         return []
 
-    def save(self, session_id: str, history: List[Message]) -> None:
+    def save(self, session_id: Optional[str], history: List[Message]) -> None:
         """
         将历史记录保存到磁盘。
 
@@ -46,17 +46,28 @@ class MemoryStore:
 
     # --- 以下是内部辅助方法 ---
 
-    def _file_path(self, session_id: str) -> Path:
+    def normalize_session_id(self, session_id: Optional[str]) -> str:
+        """
+        清洗会话名称，保证生成合法的文件名。
+
+        会去掉两端空白，只保留字母、数字、连字符与下划线；如果为空则使用 default。
+        """
+        raw = (session_id or "").strip()
+        if not raw:
+            raw = "default"
+        safe_id = "".join(ch for ch in raw if ch.isalnum() or ch in ("-", "_"))
+        if not safe_id:
+            safe_id = "default"
+        return safe_id
+
+    def _file_path(self, session_id: Optional[str]) -> Path:
         """
         根据会话 ID 生成文件路径。
 
         只保留字母、数字、连字符和下划线，防止生成非法文件名。
         空字符串会退回到默认会话 `default`。
         """
-        safe_id = session_id.strip() or "default"
-        safe_id = "".join(ch for ch in safe_id if ch.isalnum() or ch in ("-", "_"))
-        if not safe_id:
-            safe_id = "default"
+        safe_id = self.normalize_session_id(session_id)
         return self.root / f"{safe_id}.json"
 
     @staticmethod
