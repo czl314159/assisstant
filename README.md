@@ -14,7 +14,7 @@
 - **🤖 AI 助手 (`ai_assistant.py`)**:
   - 支持 **CLI** 和 **Web UI** 两种交互模式。
   - 集成阿里云**通义千问**模型，支持流式响应。
-  - 具备持久化对话历史和文件上下文注入功能。
+  - 提供多种记忆策略与多会话持久化，并可注入文件上下文。
 
 - **🌐 HTML 转 Markdown (`note_process/html_to_md.py`)**:
   - 智能提取网页正文，生成干净的 Markdown 文件。
@@ -68,20 +68,32 @@ ALIYUN_MODEL_NAME="your_model_name_here"
 
 # 周报汇总脚本的 Obsidian 库根路径
 OBSIDIAN_VAULT_ROOT="/path/to/your/obsidian_vault"
+
+# 可选: 长期记忆会话存储目录
+# MEMORY_ROOT="data/sessions"
 ```
 
 ## 使用方法
 
 ### AI 助手
-- **CLI 模式**:
+- **默认 CLI (短期记忆)**  
   ```bash
   python ai_assistant.py
   ```
-- **注入文件上下文**:
+- **选择记忆模式**  
   ```bash
-  python ai_assistant.py /path/to/your/file.txt
+  python ai_assistant.py --mode long      # 长期记忆
+  python ai_assistant.py --mode no        # 不保留历史
   ```
-- **Web UI 模式**:
+- **指定会话名称（配合长期记忆）**  
+  ```bash
+  python ai_assistant.py --mode long --session 工作
+  ```
+- **注入文件上下文**  
+  ```bash
+  python ai_assistant.py /path/to/file.txt --mode long
+  ```
+- **Web UI 模式**  
   ```bash
   python ai_assistant.py --gui
   ```

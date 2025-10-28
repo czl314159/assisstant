@@ -10,25 +10,31 @@
     注意：原有的批量处理文件夹功能已被移至 `note_process/batch_summarize.py` 脚本。
 
 使用方法:
-    1.  **CLI 模式 (默认)**:
+    1.  **CLI 模式 (默认短期记忆)**:
         在终端中运行: `python ai_assistant.py`
-        -   输入问题与 AI 对话。
-        -   输入 "quit", "exit", "bye", "goodbye" 之一可保存对话历史并退出。
+        -   直接输入问题与 AI 对话。
+        -   输入 "quit", "exit", "bye", "goodbye" 之一即可退出。
 
-    2.  **CLI 模式 (带文件注入)**:
-        在终端中运行: `python ai_assistant.py <文件路径>`
-        -   例如: `python ai_assistant.py d:/Documents/Assistant/my_document.txt`
-        -   AI 会先阅读文件内容，然后等待你的提问。
+    2.  **CLI 模式 (选择记忆策略 / 会话)**:
+        -   长期记忆: `python ai_assistant.py --mode long`
+        -   禁用记忆: `python ai_assistant.py --mode no`
+        -   指定会话: `python ai_assistant.py --mode long --session 工作`
+            (不同会话的历史会分别保存在独立文件中)
 
-    3.  **Web UI 模式**:
+    3.  **CLI 模式 (带文件注入)**:
+        在终端中运行: `python ai_assistant.py <文件路径> [其它参数]`
+        -   例如: `python ai_assistant.py notes/summary.md --mode long`
+        -   AI 会先阅读文件内容，再等待你的提问。
+
+    4.  **Web UI 模式**:
         在终端中运行: `python ai_assistant.py --gui`
-        -   这会启动一个基于 Gradio 的 Web 界面，你可以在浏览器中与 AI 交互。
+        -   启动基于 Gradio 的 Web 界面，可在浏览器中与 AI 交互。
 
 配置:
     -   **API 密钥**: 必须在项目根目录的 `.env` 文件中设置 `ALIYUN_API_KEY` 环境变量。
         例如: `ALIYUN_API_KEY="your_api_key_here"`
     -   **代理**: 如果需要，可以在 `PROXY_URL` 变量中配置代理服务器地址。
-    -   **历史记录**: CLI 模式下的对话历史保存在 `data/chat_log.json` 文件中。
+    -   **历史记录**: 长期记忆模式会将历史保存在 `data/sessions/` 目录下（可通过 `MEMORY_ROOT` 调整）。
 
 依赖:
     -   `requests`
@@ -43,13 +49,13 @@
     -   确保已安装所有依赖库 (`pip install -r requirements.txt`)。
 """
 import os
-import json
 import sys
 import gradio as gr
 import argparse
 from dotenv import load_dotenv
 # 从 note_process 文件夹下的 ai_service.py 文件中导入 AIAssistantService 类
 from ai_service import AIAssistantService
+from memory_store import MemoryStore
 
 load_dotenv() # 在所有代码之前，运行这个函数，它会自动加载.env文件
 
@@ -74,42 +80,13 @@ if not MODEL_NAME:
     print("请在.env文件中设置您的模型名称")
     exit(1)
 
-HISTORY_FILE = "data/chat_log.json" # 历史记录文件路径
+MEMORY_ROOT = os.getenv("MEMORY_ROOT", "data/sessions")
+DEFAULT_SESSION_ID = "default"
 TEMPERATURE = float(os.getenv("TEMPERATURE",0.5))
 
-data_folder = os.path.dirname(HISTORY_FILE) # 如果 data 文件夹不存在，就自动创建它
-if data_folder and not os.path.exists(data_folder):
-    os.makedirs(data_folder)
+memory_store = MemoryStore(root_dir=MEMORY_ROOT)
 
 # --- 3. 核心功能封装 ---
-
-def load_history(file_path):
-    """
-    从指定路径加载对话历史。
-    :param file_path: 历史记录文件的路径。
-    :return: 一个包含对话历史的列表。如果文件不存在，则返回空列表。
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            history = json.load(f)
-        print("AI小助手：已成功加载过往记忆。")
-        return history
-    except FileNotFoundError:
-        print("AI小助手：你好！一个新的旅程开始了。")
-        return []
-
-def save_history(history, file_path):
-    """
-    将对话历史保存到指定路径。
-    :param history: 要保存的对话历史列表。
-    :param file_path: 历史记录文件的路径。
-    """
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
-        print("AI小助手：记忆已保存，期待下次与你相见！")
-    except Exception as e:
-        print(f"AI小助手：哎呀，保存记忆时出错了：{e}")
 
 # --- 4. 命令行界面 (CLI) 启动逻辑 ---
 def start_cli():
@@ -120,25 +97,33 @@ def start_cli():
         # formatter_class 可以让帮助信息更好地显示默认值
         formatter_class=argparse.ArgumentDefaultsHelpFormatter 
     )
+    # 将文件路径作为可选的位置参数，允许用户直接在脚本名后提供
     parser.add_argument(
-        'memory_mode',
+        'file_path',
         nargs='?', # '?' 表示 0 或 1 个参数，使其成为可选的位置参数
-        choices=['no', 'short', 'long'],
-        default='short',
+        default=None,
+        help="指定要加载到上下文中的文件路径。如果提供，AI会先阅读文件内容。"
+    )
+    # 将记忆模式改为可选参数，使用 -m 或 --mode
+    parser.add_argument(
+        '-m', '--mode',
+        dest='memory_mode', # 解析后的参数名
+        choices=['no', 'short', 'long'], # 允许的值
+        default='short', # 默认值
         help="设置记忆模式: 'no' (无记忆), 'short' (短期会话记忆), 'long' (长期持久化记忆)。"
     )
     parser.add_argument(
-        '-f', '--file',
-        dest='file_path', # 解析后的参数名
-        default=None,
-        help="指定要加载到上下文中的文件路径。"
+        '--session',
+        dest='session_id',
+        default=DEFAULT_SESSION_ID,
+        help="指定会话名称，用于区分不同主题的长期记忆。"
     )
-    # 从 sys.argv 中过滤掉脚本名和 '--gui' 标志，只解析与CLI相关的参数
-    cli_args = [arg for arg in sys.argv[1:] if arg != '--gui']
-    args = parser.parse_args(cli_args)
+    args = parser.parse_args() # 直接解析所有参数
+    session_id = args.session_id.strip() or DEFAULT_SESSION_ID
 
     print("🚀 正在启动命令行 AI 助手...")
     print(f"🧠 记忆模式: {args.memory_mode}")
+    print(f"🗂 会话名称: {session_id}")
 
     # --- 2. 初始化服务和会话状态 ---
     ai_service = AIAssistantService(
@@ -150,36 +135,41 @@ def start_cli():
 
     # 根据记忆模式初始化对话历史
     if args.memory_mode == 'long':
-        conversation_history = load_history(HISTORY_FILE)
+        conversation_history = memory_store.load(session_id)
+        if conversation_history:
+            print(f"🗄 已加载会话 '{session_id}' 的历史消息，共 {len(conversation_history)} 条。")
+        else:
+            print(f"🗄 会话 '{session_id}' 暂无历史，将从头开始。")
     else:
         conversation_history = []
         print("AI小助手：你好！一个新的旅程开始了。")
 
     file_context = None
+    # 检查 file_path 是否被提供，并进行相应的处理
     if args.file_path:
+        # 如果 file_path 是一个目录，提示用户使用批量总结脚本
         if os.path.isdir(args.file_path):
-            # 如果输入的是文件夹，则提示用户使用新脚本
             print("📁 检测到文件夹输入。")
             print("此功能已移至新脚本 `note_process/batch_summarize.py`。")
             print("请使用以下命令运行批量总结功能:")
             print(f"   python note_process/batch_summarize.py \"{args.file_path}\"")
             sys.exit(0)
+        # 如果 file_path 是一个文件，加载其内容
         elif os.path.isfile(args.file_path):
-            # 如果是文件，加载文件内容作为对话上下文
             try:
                 with open(args.file_path, 'r', encoding='utf-8') as f:
                     file_context = f.read()
                 print(f"📎 已加载文件 '{os.path.basename(args.file_path)}'。现在您可以基于该文件提问了。")
             except FileNotFoundError:
                 print(f"❌ 错误：找不到文件 {args.file_path}。请检查路径是否正确。")
-                sys.exit(1)
+                sys.exit(1) # 文件未找到，程序退出
             except Exception as e:
                 print(f"❌ 处理文件时发生错误：{e}")
-                sys.exit(1)
+                sys.exit(1) # 其他文件处理错误，程序退出
+        # 如果 file_path 既不是文件也不是目录，则报错
         else:
             print(f"❌ 错误：'{args.file_path}' 既不是文件也不是文件夹。请提供有效路径。")
             sys.exit(1)
-
     # 使用 while True 创建一个无限循环，持续接收用户输入
     while True:
         # 使用 input() 来获取你在终端输入的问题
@@ -190,7 +180,7 @@ def start_cli():
         if user_input.lower() in ["quit", "exit","bye","goodbye","q","e"]:
             # 仅在长期记忆模式下保存历史
             if args.memory_mode == 'long':
-                save_history(conversation_history, HISTORY_FILE)
+                memory_store.save(session_id, conversation_history)
             print("AI小助手：期待下次与你相见！")
             break
 
