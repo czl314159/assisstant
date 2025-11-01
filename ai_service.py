@@ -65,8 +65,12 @@ class AIAssistantService:
                         if json_str.strip() == "[DONE]":
                             break
                         response_json = json.loads(json_str)
-                        content = response_json["choices"][0]["delta"].get("content", "")
-                        yield content
+                        # 安全检查：确保 'choices' 列表存在且不为空
+                        if response_json.get("choices") and len(response_json["choices"]) > 0:
+                            content = response_json["choices"][0]["delta"].get("content", "")
+                            # 确保只在有实际内容时才 yield
+                            if content:
+                                yield content
         except requests.exceptions.RequestException as e:
             yield f"\n哎呀，网络错误！无法连接到服务器。错误详情：{e}"
         except Exception as e:

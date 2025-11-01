@@ -14,12 +14,12 @@
         -   程序会提示您输入用于 AI 总结的提示词模板。
 
     2.  **使用命令行指定提示词**:
-        `python note_process/note_summarize.py "D:\\MyNotes" --prompt "请总结以下内容：{content}"`
+        `python note_process/note_summarize.py "D:\\MyNotes" --prompt "请总结以下内容：{activeNote}"`
 
     3.  **从文件加载提示词**:
         `python note_process/note_summarize.py "D:\\MyNotes" --prompt-file "my_prompt_template.txt"`
 
-    **重要**: 提示词模板中必须包含 `{content}` 占位符，它将被替换为每个文件的实际内容。
+    **重要**: 提示词模板中必须包含 `{activeNote}` 占位符，它将被替换为每个文件的实际内容。
 
 配置:
     - 依赖于项目根目录的 `.env` 文件来获取 AI 服务的相关配置（API Key, URL, Model Name等）。
@@ -86,8 +86,8 @@ def process_folder_for_summaries(folder_path, ai_service, prompt_template):
     skipped_count = 0
     error_count = 0
 
-    if "{content}" not in prompt_template:
-        print("⚠️ 警告：提供的提示词模板中未找到 '{content}' 占位符。AI可能无法获取文件内容。")
+    if "{activeNote}" not in prompt_template:
+        print("⚠️ 警告：提供的提示词模板中未找到 '{activeNote}' 占位符。AI可能无法获取文件内容。")
 
     for root, _, files in os.walk(folder_path):
         for file_name in files:
@@ -107,7 +107,7 @@ def process_folder_for_summaries(folder_path, ai_service, prompt_template):
                     skipped_count += 1
                     continue
 
-                summary_prompt = prompt_template.format(content=content)
+                summary_prompt = prompt_template.format(activeNote=content)
                 temp_history = [{"role": "user", "content": summary_prompt}]
                 
                 print("   🤖 正在请求 AI 生成内容...")
@@ -168,8 +168,8 @@ if __name__ == "__main__":
             print(f"❌ 读取提示词文件 '{args.prompt_file_path}' 时出错: {e}")
             sys.exit(1)
     else:
-        default_prompt = "请你仔细阅读以下文本，并提炼出主要内容和关键信息，生成一份简洁的总结。请直接输出总结内容，不要包含任何额外的前缀或后缀。\n\n文本内容:\n```\n{content}\n```"
-        print("\n批处理模式需要一个提示词模板。模板中必须包含 '{content}' 占位符。")
+        default_prompt = "请你仔细阅读以下文本，并提炼出主要内容和关键信息，生成一份简洁的总结。请直接输出总结内容，不要包含任何额外的前缀或后缀。\n\n文本内容:\n```\n{activeNote}\n```"
+        print("\n批处理模式需要一个提示词模板。模板中必须包含 '{activeNote}' 占位符。")
         print(f"\n示例 (默认模板):\n---\n{default_prompt}\n---")
         user_prompt = input("\n请输入你的提示词模板 (直接按 Enter 使用默认模板): \n")
         prompt_template = user_prompt.strip() or default_prompt

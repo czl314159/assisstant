@@ -178,7 +178,7 @@ def start_gui():
     def chat_response(user_input, chatbot_history, conversation_state, session_id):
         """Gradio的响应函数，现在是一个围绕Orchestrator的薄包装。"""
         # 更新本地状态和UI
-        conversation_state.append({"role": "user", "content": user_input})
+        # 用户消息将由 orchestrator 添加到 history，此处不再重复添加
         chatbot_history.append([user_input, ""])
         yield (chatbot_history, conversation_state, gr.update(value=format_session_status(session_id, conversation_state)))
 
