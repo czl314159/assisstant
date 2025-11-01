@@ -16,7 +16,7 @@
             或 `python html_to_md.py "https://example.com/article" -o /path/to/output/my_article.md`
 
     2.  **从包含多个 URL 的文件转换**:
-        `python html_to_md.py /path/to/your/links.txt`
+        `python html_to_md.py /path/to/your/links.txt -o /path/to/output/`
         -   `links.txt` 文件中每行一个 URL。
 
     3.  **启动交互式登录流程并保存会话状态**:
@@ -27,16 +27,6 @@
     -   **WSJ 登录状态路径**: 如果需要保存《华尔街日报》的登录状态，请在 `.env` 文件中设置
         `WSJ_AUTH_STATE_PATH` 环境变量，例如: `WSJ_AUTH_STATE_PATH="/path/to/your/wsj_auth_state.json"`
 
-依赖:
-    -   `playwright` (需要额外运行 `playwright install` 安装浏览器驱动)
-    -   `beautifulsoup4`
-    -   `markdownify`
-    -   `readability-lxml`
-    -   `html5lib`
-    -   `python-dotenv`
-    -   `asyncio`
-    -   `argparse`
-    -   `os`, `re`, `datetime`, `json`, `random`, `urllib.parse` (Python 内置库)
 """
 
 

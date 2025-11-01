@@ -6,6 +6,17 @@
 - 从 Collection/YYYYMMDD 文件夹中读取各笔记
 - 提取 “# 总结提炼” 至下一个 “---” 之间内容
 - 输出到 Collection/ 下的新文件
+
+用法示例:
+
+1. 直接运行 (不指定模板):
+   在命令行中执行以下命令。脚本会提示确认是否在没有模板的情况下继续。
+   > python -m note_process.weekly_gather
+
+2. 使用模板文件:
+   使用 --template 或 -t 参数指定一个 Markdown 文件作为周报的头部。
+   > python -m note_process.weekly_gather --template "D:\\path\\to\\your\\template.md"
+   (请将路径替换为您的实际模板文件路径)
 """
 
 from datetime import datetime, timedelta
